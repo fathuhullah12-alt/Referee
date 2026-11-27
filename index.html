@@ -1663,7 +1663,8 @@
 
   <script>
     (function () {
-      const STORAGE_KEY = 'mubaaraiy.futsal.v2';
+      // All match data is saved in Firestore cloud (clear any legacy localStorage copy)
+      try { localStorage.removeItem('mubaaraiy.futsal.v2'); } catch (e) {}
       const root = document.documentElement;
       const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -1777,35 +1778,21 @@
         };
       }
 
-      let state = loadState();
-      // Clock follows real time: if it was running when the page closed, carry on from where it should be
+      let state = defaultState();
+      // Clock follows real time across background/locked screen (restored from cloud m.ref on match load)
       let lastTick = Date.now();
-      if (state.clockRunning && state.tickAt && Date.now() - state.tickAt < 3 * 3600 * 1000) lastTick = state.tickAt;
-      else state.clockRunning = false;
       if (!state.shootout) state.shootout = { kicks: [] };
 
-      function loadState() {
-        try {
-          const raw = localStorage.getItem(STORAGE_KEY);
-          if (!raw) return defaultState();
-          const parsed = Object.assign(defaultState(), JSON.parse(raw));
-          if (!parsed.breakCustom && parsed.breakMinutes === 15) parsed.breakMinutes = 5;
-          return parsed;
-        } catch (e) {
-          return defaultState();
-        }
-      }
-
-      let saveTimeout = null;
       function saveState(skipCloud) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
         const txt = document.querySelector('#save-pill .save-txt');
-        if (txt) txt.textContent = 'Saving…';
-        clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => {
-          if (txt) txt.textContent = 'All changes saved';
-        }, 300);
-        if (!skipCloud && typeof scheduleCloudSync === 'function') scheduleCloudSync();
+        if (!state.linked) {
+          if (txt) txt.textContent = 'Connect a match to save';
+          return;
+        }
+        if (!skipCloud && typeof scheduleCloudSync === 'function') {
+          if (txt) txt.textContent = 'Saving to cloud…';
+          scheduleCloudSync();
+        }
       }
 
       const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -1866,8 +1853,7 @@
         for (let i = 0; i < steps; i++) { if (tickOnce()) any = true; else if (!state.clockRunning && !state.timeout) break; }
         state.tickAt = lastTick;
         if (any) {
-          // Clock ticks stay on this device (no cloud sync, no "Saving…" flash)
-          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+          // Live clock ticks update UI without spamming Firestore every second
           renderClockAndTimers();
         }
       }
@@ -1910,6 +1896,7 @@
               if (state.period === 'Extra Time 2') state.et2Done = true;
               playBuzzer(1100, 380);
               toast(`${state.period} clock reached 00:00`);
+              if (typeof scheduleCloudSync === 'function') scheduleCloudSync();
             }
           } else {
             state.clockRunning = false;
@@ -1920,8 +1907,19 @@
         return changed;
       }
       setInterval(clockLoop, 250);
-      document.addEventListener('visibilitychange', () => { if (!document.hidden) clockLoop(); });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          clockLoop();
+        } else if (state.linked && (state.clockRunning || state.timeout || state.suspensions.length) && typeof pushMatchToMainApp === 'function') {
+          pushMatchToMainApp();
+        }
+      });
       window.addEventListener('pageshow', clockLoop);
+      window.addEventListener('pagehide', () => {
+        if (state.linked && (state.clockRunning || state.timeout || state.suspensions.length) && typeof pushMatchToMainApp === 'function') {
+          pushMatchToMainApp();
+        }
+      });
 
       // Modals
       const actionModal = document.getElementById('action-modal');
@@ -3444,6 +3442,42 @@
         m.fouls = { h: state.teams.home.fouls, a: state.teams.away.fouls };
         m.timeouts = { h: state.teams.home.timeouts.filter(Boolean).length, a: state.teams.away.timeouts.filter(Boolean).length };
 
+        // Full Referee panel state saved in Firestore cloud (fouls, per-player fouls, timeouts, suspensions, shootout, full events log, clock)
+        const pfHome = {}, pfAway = {};
+        state.teams.home.players.forEach(p => { if (p.fouls) pfHome[p.name] = p.fouls; });
+        state.teams.away.players.forEach(p => { if (p.fouls) pfAway[p.name] = p.fouls; });
+        m.ref = {
+          status: state.status,
+          period: state.period,
+          halfMinutes: state.halfMinutes,
+          breakMinutes: state.breakMinutes,
+          breakCustom: !!state.breakCustom,
+          addedTime: state.addedTime || 0,
+          et2Done: !!state.et2Done,
+          clockSec: state.clockSec,
+          clockRunning: !!state.clockRunning,
+          tickAt: state.tickAt || Date.now(),
+          swapped: !!state.swapped,
+          timeout: state.timeout ? { team: state.timeout.team, sec: state.timeout.sec } : null,
+          fouls: { h: state.teams.home.fouls, a: state.teams.away.fouls },
+          timeouts: {
+            h: [!!state.teams.home.timeouts[0], !!state.teams.home.timeouts[1]],
+            a: [!!state.teams.away.timeouts[0], !!state.teams.away.timeouts[1]]
+          },
+          playerFouls: { h: pfHome, a: pfAway },
+          suspensions: (state.suspensions || []).map(s => ({ id: s.id, team: s.team, player: s.player, sec: s.sec, total: s.total })),
+          shootout: {
+            kicks: ((state.shootout && state.shootout.kicks) || []).map(k => ({
+              id: k.id, team: k.team, scored: !!k.scored, player: k.player || ''
+            }))
+          },
+          events: (state.events || []).map(e => ({
+            id: e.id, period: e.period, clock: e.clock, min: e.min || 1,
+            team: e.team, type: e.type, label: e.label, detail: e.detail || '',
+            player: e.player || '', assist: e.assist || ''
+          }))
+        };
+
         // Full-time / completed result -> marks match completed in main app & updates Standings, Top Scorers & Cards
         if (state.status === 'done') {
           m.hs = state.teams.home.score;
@@ -3473,13 +3507,21 @@
 
         // Nothing new for the site: skip the write
         const sig = JSON.stringify([copy.status, m]);
-        if (sig === cloud.lastSig) return;
+        if (sig === cloud.lastSig) {
+          const txt = document.querySelector('#save-pill .save-txt');
+          if (txt) txt.textContent = 'Saved to cloud';
+          return;
+        }
         cloud.syncing = true;
         updateSyncPill();
         try {
           await cloud.db.collection('tournaments').doc(copy.id).set(copy);
           cloud.lastSig = sig;
+          const txt = document.querySelector('#save-pill .save-txt');
+          if (txt) txt.textContent = 'Saved to cloud';
         } catch (e) {
+          const txt = document.querySelector('#save-pill .save-txt');
+          if (txt) txt.textContent = 'Cloud save failed';
           toast('Sync error: check permissions or internet connection.');
         } finally {
           cloud.syncing = false;
@@ -3487,7 +3529,7 @@
         }
       }
 
-      function extractSquadPlayers(team, teamId, srcGoals, srcCards, existingPlayers) {
+      function extractSquadPlayers(team, teamId, srcGoals, srcCards, existingPlayers, playerFoulsMap) {
         const raw = Array.isArray(team && team.players) ? team.players : [];
         const prevById = new Map();
         const prevByName = new Map();
@@ -3506,6 +3548,7 @@
           const aCount = srcGoals ? srcGoals.filter(g => String(g.team) === String(teamId) && g.assist === name).length : (prev ? prev.assists : 0);
           const yCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'y').length : (prev ? prev.yellow : 0);
           const rCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'r').length : (prev ? prev.red : 0);
+          const fCount = playerFoulsMap && playerFoulsMap[name] != null ? Number(playerFoulsMap[name]) || 0 : (prev ? (prev.fouls || 0) : 0);
           return {
             id,
             num: numVal !== '' && numVal != null ? String(numVal) : '',
@@ -3514,7 +3557,7 @@
             assists: aCount,
             yellow: yCount,
             red: rCount,
-            fouls: prev ? (prev.fouls || 0) : 0,
+            fouls: fCount,
             fromMain: true
           };
         }).filter(Boolean);
@@ -3565,45 +3608,65 @@
         }
         const matchNo = (t.matches || []).indexOf(m) + 1;
         const isPlayed = m.hs != null && m.as != null;
+        const ref = m.ref || null;
 
         const srcGoals = isPlayed ? (m.goals || []) : (m.lgoals || []);
         const srcCards = isPlayed ? (m.cards || []) : (m.lcards || []);
-        const mapPlayers = (team, teamId) => extractSquadPlayers(team, teamId, srcGoals, srcCards);
+        const pfHome = (ref && ref.playerFouls && ref.playerFouls.h) || null;
+        const pfAway = (ref && ref.playerFouls && ref.playerFouls.a) || null;
+        const mapPlayers = (team, teamId, pfMap) => extractSquadPlayers(team, teamId, srcGoals, srcCards, null, pfMap);
 
-        // Reconstruct events log from existing live or saved goals/cards
-        const rebuiltEvents = [];
-        srcGoals.forEach(g => {
-          const tk = g.team === m.away ? 'away' : 'home';
-          const tm = tk === 'home' ? homeTeam.name : awayTeam.name;
-          const detail = g.assist ? `${g.player} (Assist: ${g.assist}) · ${tm}` : `${g.player} · ${tm}`;
-          rebuiltEvents.unshift({
-            id: uid(), period: m.half === '2' ? '2nd Half' : '1st Half',
-            clock: g.min ? `${pad2(g.min)}:00` : '00:00',
-            team: tk, type: 'goal', label: 'Goal', detail, player: g.player, assist: g.assist || '', min: g.min
+        // Use full cloud-saved events log when available; fall back to reconstructing from goals/cards for older matches
+        let restoredEvents = null;
+        if (ref && Array.isArray(ref.events)) {
+          restoredEvents = ref.events.map(e => Object.assign({}, e));
+        } else {
+          restoredEvents = [];
+          srcGoals.forEach(g => {
+            const tk = g.team === m.away ? 'away' : 'home';
+            const tm = tk === 'home' ? homeTeam.name : awayTeam.name;
+            const detail = g.assist ? `${g.player} (Assist: ${g.assist}) · ${tm}` : `${g.player} · ${tm}`;
+            restoredEvents.unshift({
+              id: uid(), period: m.half === '2' ? '2nd Half' : '1st Half',
+              clock: g.min ? `${pad2(g.min)}:00` : '00:00',
+              team: tk, type: 'goal', label: 'Goal', detail, player: g.player, assist: g.assist || '', min: g.min
+            });
           });
-        });
-        srcCards.forEach(c => {
-          const tk = c.team === m.away ? 'away' : 'home';
-          const tm = tk === 'home' ? homeTeam.name : awayTeam.name;
-          rebuiltEvents.unshift({
-            id: uid(), period: m.half === '2' ? '2nd Half' : '1st Half',
-            clock: c.min ? `${pad2(c.min)}:00` : '00:00',
-            team: tk, type: c.c === 'r' ? 'red' : 'yellow',
-            label: c.c === 'r' ? 'Red card' : 'Yellow card',
-            detail: `${c.player} (${tm})`, player: c.player, min: c.min
+          srcCards.forEach(c => {
+            const tk = c.team === m.away ? 'away' : 'home';
+            const tm = tk === 'home' ? homeTeam.name : awayTeam.name;
+            restoredEvents.unshift({
+              id: uid(), period: m.half === '2' ? '2nd Half' : '1st Half',
+              clock: c.min ? `${pad2(c.min)}:00` : '00:00',
+              team: tk, type: c.c === 'r' ? 'red' : 'yellow',
+              label: c.c === 'r' ? 'Red card' : 'Yellow card',
+              detail: `${c.player} (${tm})`, player: c.player, min: c.min
+            });
           });
-        });
+        }
 
         const fresh = defaultState();
-        fresh.halfMinutes = state.halfMinutes || 20;
-        fresh.breakMinutes = state.breakCustom ? (state.breakMinutes || 5) : 5;
-        fresh.breakCustom = !!state.breakCustom;
-        fresh.clockSec = fresh.halfMinutes * 60;
-        fresh.status = isPlayed ? 'done' : m.started ? (m.half === 'ht' ? 'halftime' : 'live') : 'upcoming';
-        fresh.period = m.half === 'ht' ? 'Half-Time' : m.half === '2' ? '2nd Half' : '1st Half';
+        fresh.halfMinutes = (ref && ref.halfMinutes) || state.halfMinutes || 20;
+        fresh.breakMinutes = (ref && ref.breakMinutes) || (state.breakCustom ? (state.breakMinutes || 5) : 5);
+        fresh.breakCustom = ref ? !!ref.breakCustom : !!state.breakCustom;
+        fresh.addedTime = (ref && ref.addedTime) || 0;
+        fresh.et2Done = !!(ref && ref.et2Done);
+        fresh.swapped = !!(ref && ref.swapped);
+        fresh.status = isPlayed ? 'done' : (ref && ref.status) ? ref.status : (m.started ? (m.half === 'ht' ? 'halftime' : 'live') : 'upcoming');
+        fresh.period = (ref && ref.period) || (m.half === 'ht' ? 'Half-Time' : m.half === '2' ? '2nd Half' : '1st Half');
+        fresh.clockSec = (ref && ref.clockSec != null) ? ref.clockSec : (fresh.period === 'Half-Time' ? fresh.breakMinutes : (fresh.period.startsWith('Extra') ? 5 : fresh.halfMinutes)) * 60;
+        fresh.clockRunning = !!(ref && ref.clockRunning && fresh.status !== 'done');
+        fresh.tickAt = (ref && ref.tickAt) || Date.now();
+        fresh.timeout = (ref && ref.timeout) ? { team: ref.timeout.team, sec: ref.timeout.sec } : null;
         fresh.kickAt = m.kickAt || null;
         fresh.htAt = m.htAt || null;
         fresh.h2At = m.h2At || null;
+        fresh.suspensions = (ref && Array.isArray(ref.suspensions))
+          ? ref.suspensions.map(s => ({ id: s.id, team: s.team, player: s.player, sec: s.sec, total: s.total }))
+          : [];
+        fresh.shootout = (ref && ref.shootout && Array.isArray(ref.shootout.kicks))
+          ? { kicks: ref.shootout.kicks.map(k => ({ id: k.id, team: k.team, scored: !!k.scored, player: k.player || '' })) }
+          : { kicks: [] };
         fresh.linked = {
           tournamentId: t.id,
           tournamentName: t.name,
@@ -3614,27 +3677,37 @@
           homeId: m.home,
           awayId: m.away
         };
+        const toArr = (arr, cnt) => Array.isArray(arr) ? [!!arr[0], !!arr[1]] : [cnt >= 1, cnt >= 2];
         fresh.teams.home = {
           name: homeTeam.name,
           color: homeTeam.c1 || '#3d8a89',
           score: isPlayed ? m.hs : (m.lh || 0),
-          fouls: (m.fouls && m.fouls.h) || 0,
-          timeouts: [false, false],
-          players: mapPlayers(homeTeam, m.home)
+          fouls: (ref && ref.fouls && ref.fouls.h != null) ? ref.fouls.h : ((m.fouls && m.fouls.h) || 0),
+          timeouts: toArr(ref && ref.timeouts && ref.timeouts.h, (m.timeouts && m.timeouts.h) || 0),
+          players: mapPlayers(homeTeam, m.home, pfHome)
         };
         fresh.teams.away = {
           name: awayTeam.name,
           color: awayTeam.c1 || '#2f6aa8',
           score: isPlayed ? m.as : (m.la || 0),
-          fouls: (m.fouls && m.fouls.a) || 0,
-          timeouts: [false, false],
-          players: mapPlayers(awayTeam, m.away)
+          fouls: (ref && ref.fouls && ref.fouls.a != null) ? ref.fouls.a : ((m.fouls && m.fouls.a) || 0),
+          timeouts: toArr(ref && ref.timeouts && ref.timeouts.a, (m.timeouts && m.timeouts.a) || 0),
+          players: mapPlayers(awayTeam, m.away, pfAway)
         };
-        fresh.events = rebuiltEvents;
+        fresh.events = restoredEvents;
 
         state = fresh;
-        saveState(true);
-        // Keep the address on this match, so a refresh doesn't jump back to the old one
+        cloud.lastSig = null;
+        if (state.clockRunning && state.tickAt && Date.now() - state.tickAt < 3 * 3600 * 1000) {
+          lastTick = state.tickAt;
+          clockLoop();
+        } else {
+          state.clockRunning = false;
+          lastTick = Date.now();
+        }
+        const txt = document.querySelector('#save-pill .save-txt');
+        if (txt) txt.textContent = 'Saved to cloud';
+        // Keep the address on this match, so a refresh reloads directly from cloud
         try {
           const u = new URL(location.href);
           u.searchParams.set('t', t.id); u.searchParams.set('m', m.id);
