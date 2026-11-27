@@ -1422,6 +1422,103 @@
       font-weight: 600;
     }
     .lock-banner[hidden] { display: none; }
+    .ref-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px;
+      border-radius: 999px;
+      background: var(--field);
+      border: 1px solid var(--line);
+    }
+    .ref-tab {
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--fg-muted);
+      padding: 4px 11px;
+      font: 700 12px/1.2 var(--font-body);
+      cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .ref-tab:hover { color: var(--fg); }
+    .ref-tab.is-active {
+      background: var(--teal);
+      color: #fff;
+    }
+    .ps-wrap {
+      display: grid;
+      gap: 12px;
+      padding: 12px 0 28px;
+    }
+    .ps-wrap[hidden] { display: none; }
+    .ps-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 14px;
+      background: var(--card);
+      border: 1px solid var(--line);
+    }
+    .ps-bar select, .ps-bar input {
+      min-height: 36px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .ps-bar .ps-sel { flex: 1 1 200px; min-width: 160px; }
+    .ps-bar .ps-team { flex: 0 1 180px; min-width: 130px; }
+    .ps-bar .ps-search { flex: 1 1 160px; min-width: 140px; }
+    .ps-bar .ps-sort { flex: 0 1 150px; min-width: 125px; }
+    .ps-kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 8px;
+    }
+    .ps-kpi {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      display: grid;
+      gap: 2px;
+    }
+    .ps-kpi strong { font: 800 24px/1.05 var(--font-display); }
+    .ps-kpi small { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-dim); }
+    .ps-card {
+      border-radius: 14px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .ps-table-wrap { overflow-x: auto; }
+    .ps-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ps-table th, .ps-table td { padding: 9px 10px; border-bottom: 1px solid var(--line-soft); text-align: center; white-space: nowrap; }
+    .ps-table th:nth-child(2), .ps-table td:nth-child(2) { text-align: left; white-space: normal; min-width: 170px; }
+    .ps-table th { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-dim); background: var(--field); }
+    .ps-row { cursor: pointer; transition: background .12s; }
+    .ps-row:hover { background: color-mix(in srgb, var(--teal) 8%, transparent); }
+    .ps-row.is-open { background: color-mix(in srgb, var(--teal) 12%, transparent); }
+    .ps-pname { display: flex; flex-direction: column; gap: 2px; }
+    .ps-pname b { font-size: 13.5px; color: var(--fg); }
+    .ps-pname small { font-size: 11.5px; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
+    .ps-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+    .ps-detail-row td { padding: 0; background: var(--field); }
+    .ps-detail { padding: 10px 14px; display: grid; gap: 6px; text-align: left; }
+    .ps-m-item {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      background: var(--card);
+      border: 1px solid var(--line-soft);
+      font-size: 12.5px;
+    }
+    .ps-m-badges { display: flex; flex-wrap: wrap; gap: 6px; font-weight: 700; }
     /* Sign-in lock: only admins and managers get past it */
     .gate { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 20px; background: var(--bg); overflow-y: auto; }
     .gate[hidden] { display: none; }
@@ -1511,7 +1608,10 @@
       </div>
 
       <div class="hdr-status">
-        <span class="tag t-green">Futsal</span>
+        <div class="ref-tabs" role="tablist" aria-label="Referee views">
+          <button class="ref-tab is-active" type="button" id="tab-match" role="tab" aria-selected="true">Match Control</button>
+          <button class="ref-tab" type="button" id="tab-players" role="tab" aria-selected="false">Player Stats</button>
+        </div>
         <span class="status upcoming" id="match-status-badge">UPCOMING</span>
       </div>
 
@@ -1550,7 +1650,7 @@
   </header>
 
   <main>
-    <div class="wrap dashboard">
+    <div class="wrap dashboard" id="view-match">
       <!-- Active 1-Min Timeout Banner -->
       <div class="timeout-banner" id="timeout-banner" hidden>
         <div>
@@ -1659,6 +1759,30 @@
         <!-- Right Team Players -->
         <article class="card-flat deck-col" id="roster-right"></article>
       </section>
+    </div>
+
+    <!-- Tournament Player Match Data Tab -->
+    <div class="wrap ps-wrap" id="view-players" hidden>
+      <div class="ps-bar">
+        <select class="input ps-sel" id="ps-tournament" aria-label="Select tournament"></select>
+        <select class="input ps-team" id="ps-team" aria-label="Filter by team">
+          <option value="">All teams</option>
+        </select>
+        <input class="input ps-search" id="ps-search" type="search" placeholder="Search player or #…">
+        <select class="input ps-sort" id="ps-sort" aria-label="Sort players">
+          <option value="goals">Sort: Goals</option>
+          <option value="assists">Sort: Assists</option>
+          <option value="fouls">Sort: Fouls</option>
+          <option value="yellow">Sort: Yellow cards</option>
+          <option value="red">Sort: Red cards</option>
+          <option value="matches">Sort: Matches</option>
+          <option value="name">Sort: Name</option>
+        </select>
+      </div>
+      <div class="ps-kpis" id="ps-kpis"></div>
+      <div class="ps-card">
+        <div class="ps-table-wrap" id="ps-table-wrap"></div>
+      </div>
     </div>
   </main>
 
@@ -3068,7 +3192,9 @@
         saveState(true);
         render();
         if (state.linked && canPushCloud()) {
-          pushMatchToMainApp().then(() => toast('Match marked completed — synced to main app!'));
+          pushMatchToMainApp(true).then(ok => {
+            if (ok) toast('Match marked completed — updated in main app!');
+          });
         } else {
           toast('Match marked completed!');
         }
@@ -3705,15 +3831,16 @@
         cloud.syncTimer = setTimeout(pushMatchToMainApp, 350);
       }
 
-      async function pushMatchToMainApp() {
-        if (!state.linked || !canPushCloud()) return;
+      async function pushMatchToMainApp(force = false) {
+        if (!state.linked || !canPushCloud()) return false;
+        clearTimeout(cloud.syncTimer);
         const t = cloud.tournaments.find(x => x.id === state.linked.tournamentId);
-        if (!t) return;
+        if (!t) return false;
         const copy = JSON.parse(JSON.stringify(t));
         MEMBER_KEYS.forEach(k => delete copy[k]);
 
         const m = (copy.matches || []).find(x => x.id === state.linked.matchId);
-        if (!m) return;
+        if (!m) return false;
 
         const homeId = state.linked.homeId;
         const awayId = state.linked.awayId;
@@ -3740,8 +3867,8 @@
         // Live match state -> updates main app Live Score & Today's Matches
         const isLiveOrDone = state.status !== 'upcoming';
         m.started = isLiveOrDone;
-        m.lh = state.teams.home.score;
-        m.la = state.teams.away.score;
+        m.lh = Number(state.teams.home.score) || 0;
+        m.la = Number(state.teams.away.score) || 0;
         m.lgoals = goalsArr;
         m.lcards = cardsArr;
         m.half = state.period === 'Half-Time' ? 'ht' : (state.period === '2nd Half' || state.period.startsWith('Extra') ? '2' : '1');
@@ -3787,24 +3914,28 @@
             a: [!!state.teams.away.timeouts[0], !!state.teams.away.timeouts[1]]
           },
           playerFouls: { h: pfHome, a: pfAway },
-          suspensions: (state.suspensions || []).map(s => ({ id: s.id, team: s.team, player: s.player, sec: s.sec, total: s.total })),
+          suspensions: (state.suspensions || []).map(s => ({ id: s.id || uid(), team: s.team || 'home', player: s.player || '', sec: Number(s.sec) || 0, total: Number(s.total) || 120 })),
           shootout: {
             kicks: ((state.shootout && state.shootout.kicks) || []).map(k => ({
-              id: k.id, team: k.team, scored: !!k.scored, player: k.player || ''
+              id: k.id || uid(), team: k.team || 'home', scored: !!k.scored, player: k.player || ''
             }))
           },
           events: (state.events || []).map(e => ({
-            id: e.id, period: e.period, clock: e.clock, min: e.min || 1,
-            team: e.team, type: e.type, label: e.label, detail: e.detail || '',
+            id: e.id || uid(), period: e.period || '1st Half', clock: e.clock || '00:00', min: e.min || 1,
+            team: e.team || 'home', type: e.type || 'info', label: e.label || '', detail: e.detail || '',
             player: e.player || '', assist: e.assist || ''
           }))
         };
 
         // Full-time / completed result -> marks match completed in main app & updates Standings, Top Scorers & Cards
         if (state.status === 'done') {
-          m.hs = state.teams.home.score;
-          m.as = state.teams.away.score;
+          m.hs = Number(state.teams.home.score) || 0;
+          m.as = Number(state.teams.away.score) || 0;
           m.completed = true;
+          m.started = true;
+          delete m.rc;
+          delete m.htEnd;
+          delete m.htLeft;
           m.goals = goalsArr.map(g => {
             const o = { team: g.team, player: g.player };
             if (g.assist) o.assist = g.assist;
@@ -3812,6 +3943,7 @@
           });
           m.cards = cardsArr.map(c => ({ team: c.team, player: c.player, c: c.c }));
           if (!m.doneAt) m.doneAt = Date.now();
+          if (!copy.status || copy.status === 'upcoming') copy.status = 'live';
 
           const so = shootoutStats();
           if (state.shootout.kicks.length && m.hs === m.as) {
@@ -3827,24 +3959,30 @@
           if (isLiveOrDone && (!copy.status || copy.status === 'upcoming')) copy.status = 'live';
         }
 
-        // Nothing new for the site: skip the write
-        const sig = JSON.stringify([copy.status, m]);
-        if (sig === cloud.lastSig) {
+        // Strip any accidental undefined values so Firestore never rejects the write
+        const clean = JSON.parse(JSON.stringify(copy));
+
+        // Nothing new for the site: skip the write unless forced (e.g. Mark completed)
+        const sig = JSON.stringify([clean.status, clean.matches.find(x => x.id === state.linked.matchId)]);
+        if (!force && sig === cloud.lastSig) {
           const txt = document.querySelector('#save-pill .save-txt');
           if (txt) txt.textContent = 'Saved to cloud';
-          return;
+          return true;
         }
         cloud.syncing = true;
         updateSyncPill();
         try {
-          await cloud.db.collection('tournaments').doc(copy.id).set(copy);
+          await cloud.db.collection('tournaments').doc(clean.id).set(clean);
           cloud.lastSig = sig;
           const txt = document.querySelector('#save-pill .save-txt');
           if (txt) txt.textContent = 'Saved to cloud';
+          return true;
         } catch (e) {
+          console.error('Firestore sync error:', e);
           const txt = document.querySelector('#save-pill .save-txt');
           if (txt) txt.textContent = 'Cloud save failed';
-          toast('Sync error: check permissions or internet connection.');
+          toast('Sync error: ' + (e && e.message ? e.message : 'check permissions or internet connection.'));
+          return false;
         } finally {
           cloud.syncing = false;
           updateSyncPill();
@@ -4332,11 +4470,321 @@
                 syncLinkedRostersFromCloud();
               }
               if (!connectModal.hidden) renderConnectModal();
+              if (!document.getElementById('view-players').hidden) renderPlayerStats();
             });
 
             updateSyncPill();
           })
           .catch(() => { gateMsg.textContent = 'Could not reach the club database. Check your internet and reload.'; });
+      }
+
+      // ===== Tournament Player Match Data Tab =====
+      let psState = { tournamentId: '', teamId: '', search: '', sort: 'goals', openKey: '' };
+      const tabMatchBtn = document.getElementById('tab-match');
+      const tabPlayersBtn = document.getElementById('tab-players');
+      const viewMatchEl = document.getElementById('view-match');
+      const viewPlayersEl = document.getElementById('view-players');
+
+      function switchMainTab(tab) {
+        const isPlayers = tab === 'players';
+        tabMatchBtn.classList.toggle('is-active', !isPlayers);
+        tabMatchBtn.setAttribute('aria-selected', String(!isPlayers));
+        tabPlayersBtn.classList.toggle('is-active', isPlayers);
+        tabPlayersBtn.setAttribute('aria-selected', String(isPlayers));
+        viewMatchEl.hidden = isPlayers;
+        viewPlayersEl.hidden = !isPlayers;
+        if (isPlayers) renderPlayerStats();
+      }
+      tabMatchBtn.addEventListener('click', () => switchMainTab('match'));
+      tabPlayersBtn.addEventListener('click', () => switchMainTab('players'));
+
+      document.getElementById('ps-tournament').addEventListener('change', e => {
+        psState.tournamentId = e.target.value;
+        psState.teamId = '';
+        psState.openKey = '';
+        renderPlayerStats();
+      });
+      document.getElementById('ps-team').addEventListener('change', e => {
+        psState.teamId = e.target.value;
+        psState.openKey = '';
+        renderPlayerStats();
+      });
+      document.getElementById('ps-search').addEventListener('input', e => {
+        psState.search = e.target.value.trim().toLowerCase();
+        renderPlayerStats();
+      });
+      document.getElementById('ps-sort').addEventListener('change', e => {
+        psState.sort = e.target.value;
+        renderPlayerStats();
+      });
+
+      function renderPlayerStats() {
+        const tSel = document.getElementById('ps-tournament');
+        const teamSel = document.getElementById('ps-team');
+        const kpisEl = document.getElementById('ps-kpis');
+        const wrapEl = document.getElementById('ps-table-wrap');
+
+        const tours = (cloud.tournaments || []).filter(t => t && t.squads && t.squads.length);
+        if (!tours.length) {
+          tSel.innerHTML = '<option value="">No tournaments loaded</option>';
+          teamSel.innerHTML = '<option value="">All teams</option>';
+          kpisEl.innerHTML = '';
+          wrapEl.innerHTML = '<p class="empty-note" style="padding:28px;">No tournaments available yet. Connect to Firestore to view player match data.</p>';
+          return;
+        }
+
+        if (!psState.tournamentId || !tours.some(x => x.id === psState.tournamentId)) {
+          psState.tournamentId = (state.linked && tours.some(x => x.id === state.linked.tournamentId))
+            ? state.linked.tournamentId
+            : tours[0].id;
+        }
+        tSel.innerHTML = tours.map(t => `<option value="${esc(t.id)}" ${t.id === psState.tournamentId ? 'selected' : ''}>${esc(t.name || 'Tournament')}</option>`).join('');
+
+        const tour = tours.find(x => x.id === psState.tournamentId);
+        const squads = tour.squads || [];
+        const sqById = new Map();
+        squads.forEach(s => sqById.set(String(s.id), s));
+
+        if (psState.teamId && !sqById.has(String(psState.teamId))) psState.teamId = '';
+        teamSel.innerHTML = `<option value="">All teams (${squads.length})</option>` +
+          squads.map(s => `<option value="${esc(s.id)}" ${String(s.id) === String(psState.teamId) ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+
+        // Seed map with all registered players & officials from squads
+        const people = new Map();
+        const keyFor = (teamId, name) => `${String(teamId)}|${String(name || '').trim().toLowerCase()}`;
+        const ensurePerson = (teamId, name, num = '', role = '') => {
+          const cleanName = String(name || '').trim();
+          if (!cleanName) return null;
+          const k = keyFor(teamId, cleanName);
+          if (!people.has(k)) {
+            const sq = sqById.get(String(teamId));
+            people.set(k, {
+              key: k,
+              teamId: String(teamId),
+              teamName: sq ? sq.name : 'Team',
+              teamColor: (sq && sq.c1) || '#3d8a89',
+              num: num !== '' && num != null ? String(num) : '',
+              name: cleanName,
+              role: role || '',
+              goals: 0,
+              assists: 0,
+              fouls: 0,
+              yellow: 0,
+              red: 0,
+              penGoals: 0,
+              matchIds: new Set(),
+              matches: []
+            });
+          }
+          return people.get(k);
+        };
+
+        squads.forEach(sq => {
+          (sq.players || []).forEach(p => {
+            const isStr = typeof p === 'string';
+            const nm = isStr ? p : (p && (p.name || p.player || p.fullName) || '');
+            const num = isStr ? '' : (p.number != null ? p.number : (p.num != null ? p.num : ''));
+            ensurePerson(sq.id, nm, num, '');
+          });
+          (sq.officials || []).forEach(o => {
+            const isStr = typeof o === 'string';
+            const nm = isStr ? o : (o && (o.name || o.fullName) || '');
+            const role = isStr ? 'Official' : (o.role || 'Official');
+            ensurePerson(sq.id, nm, '', role);
+          });
+        });
+
+        // Aggregate across EVERY match in the tournament
+        const matches = tour.matches || [];
+        let completedMatches = 0, liveMatches = 0, totalGoals = 0, totalYellow = 0, totalRed = 0, totalFouls = 0;
+
+        matches.forEach((m, idx) => {
+          const isPlayed = m.hs != null && m.as != null;
+          const isLive = !isPlayed && !!m.started;
+          if (isPlayed) completedMatches++;
+          else if (isLive) liveMatches++;
+          if (!isPlayed && !isLive && !(m.ref && m.ref.events && m.ref.events.length)) return;
+
+          const hSq = sqById.get(String(m.home));
+          const aSq = sqById.get(String(m.away));
+          const hName = hSq ? hSq.name : 'Home';
+          const aName = aSq ? aSq.name : 'Away';
+          const hs = isPlayed ? m.hs : (m.lh || 0);
+          const as = isPlayed ? m.as : (m.la || 0);
+          const mLabel = `M${idx + 1}${m.stage ? ' · ' + m.stage : ''}`;
+          const mStatus = isPlayed ? 'Completed' : 'Live';
+
+          const perMatch = new Map();
+          const getRec = (teamId, name) => {
+            const p = ensurePerson(teamId, name);
+            if (!p) return null;
+            if (!perMatch.has(p.key)) {
+              const isHome = String(teamId) === String(m.home);
+              perMatch.set(p.key, {
+                p,
+                matchNo: idx + 1,
+                label: mLabel,
+                status: mStatus,
+                opp: isHome ? aName : hName,
+                score: isHome ? `${hs}–${as}` : `${as}–${hs}`,
+                goals: 0, assists: 0, fouls: 0, yellow: 0, red: 0, penGoals: 0
+              });
+            }
+            return perMatch.get(p.key);
+          };
+
+          // Goals & assists (prefer completed m.goals, else m.lgoals)
+          const srcGoals = isPlayed ? (m.goals || []) : (m.lgoals || []);
+          srcGoals.forEach(g => {
+            const r = getRec(g.team, g.player);
+            if (r) { r.goals++; r.p.goals++; totalGoals++; }
+            if (g.assist) {
+              const ra = getRec(g.team, g.assist);
+              if (ra) { ra.assists++; ra.p.assists++; }
+            }
+          });
+
+          // Cards (prefer completed m.cards, else m.lcards)
+          const srcCards = isPlayed ? (m.cards || []) : (m.lcards || []);
+          srcCards.forEach(c => {
+            const r = getRec(c.team, c.player);
+            if (!r) return;
+            if (c.c === 'r') { r.red++; r.p.red++; totalRed++; }
+            else { r.yellow++; r.p.yellow++; totalYellow++; }
+          });
+
+          // Fouls & shootout from cloud m.ref
+          if (m.ref) {
+            const pf = m.ref.playerFouls || {};
+            Object.entries(pf.h || {}).forEach(([nm, cnt]) => {
+              const n = Number(cnt) || 0;
+              if (!n) return;
+              const r = getRec(m.home, nm);
+              if (r) { r.fouls += n; r.p.fouls += n; totalFouls += n; }
+            });
+            Object.entries(pf.a || {}).forEach(([nm, cnt]) => {
+              const n = Number(cnt) || 0;
+              if (!n) return;
+              const r = getRec(m.away, nm);
+              if (r) { r.fouls += n; r.p.fouls += n; totalFouls += n; }
+            });
+            const kicks = (m.ref.shootout && m.ref.shootout.kicks) || [];
+            kicks.forEach(k => {
+              if (!k.scored || !k.player) return;
+              const tid = k.team === 'away' ? m.away : m.home;
+              const r = getRec(tid, k.player);
+              if (r) { r.penGoals++; r.p.penGoals++; }
+            });
+          }
+
+          perMatch.forEach(rec => {
+            rec.p.matchIds.add(m.id);
+            rec.p.matches.push(rec);
+          });
+        });
+
+        // Filter & sort rows
+        let rows = Array.from(people.values());
+        if (psState.teamId) rows = rows.filter(r => String(r.teamId) === String(psState.teamId));
+        if (psState.search) {
+          rows = rows.filter(r =>
+            r.name.toLowerCase().includes(psState.search) ||
+            r.num.toLowerCase().includes(psState.search) ||
+            r.teamName.toLowerCase().includes(psState.search) ||
+            (r.role && r.role.toLowerCase().includes(psState.search))
+          );
+        }
+
+        const sKey = psState.sort;
+        rows.sort((a, b) => {
+          if (sKey === 'name') return a.name.localeCompare(b.name);
+          if (sKey === 'matches') return b.matchIds.size - a.matchIds.size || b.goals - a.goals || a.name.localeCompare(b.name);
+          return (b[sKey] - a[sKey]) || (b.goals - a.goals) || (b.assists - a.assists) || a.name.localeCompare(b.name);
+        });
+
+        kpisEl.innerHTML = `
+          <div class="ps-kpi"><strong>${completedMatches}${liveMatches ? ` <span style="font-size:13px;color:var(--live);">+${liveMatches} live</span>` : ''}</strong><small>Matches Played</small></div>
+          <div class="ps-kpi"><strong>${rows.length}</strong><small>Players / Officials</small></div>
+          <div class="ps-kpi"><strong>${totalGoals}</strong><small>Goals</small></div>
+          <div class="ps-kpi"><strong>${totalFouls}</strong><small>Player Fouls</small></div>
+          <div class="ps-kpi"><strong>${totalYellow} / ${totalRed}</strong><small>Cards (Y / R)</small></div>
+        `;
+
+        if (!rows.length) {
+          wrapEl.innerHTML = '<p class="empty-note" style="padding:24px;">No matching players found.</p>';
+          return;
+        }
+
+        wrapEl.innerHTML = `
+          <table class="ps-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Player / Official</th>
+                <th>Matches</th>
+                <th>⚽ Goals</th>
+                <th>🅰️ Assists</th>
+                <th>⚠️ Fouls</th>
+                <th>🟨 Y</th>
+                <th>🟥 R</th>
+                <th>🎯 Pen</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => {
+                const isOpen = psState.openKey === r.key;
+                const detailHtml = isOpen ? `
+                  <tr class="ps-detail-row">
+                    <td colspan="9">
+                      <div class="ps-detail">
+                        ${r.matches.length ? r.matches.map(m => {
+                          const b = [];
+                          if (m.goals) b.push(`⚽ ${m.goals}`);
+                          if (m.assists) b.push(`🅰️ ${m.assists}`);
+                          if (m.fouls) b.push(`⚠️ ${m.fouls}`);
+                          if (m.yellow) b.push(`🟨 ${m.yellow}`);
+                          if (m.red) b.push(`🟥 ${m.red}`);
+                          if (m.penGoals) b.push(`🎯 ${m.penGoals}`);
+                          return `
+                            <div class="ps-m-item">
+                              <span><b>${esc(m.label)}</b> vs ${esc(m.opp)} (${esc(m.score)}) · <small style="color:var(--fg-dim);">${esc(m.status)}</small></span>
+                              <span class="ps-m-badges">${b.join(' · ') || 'No events'}</span>
+                            </div>
+                          `;
+                        }).join('') : '<small style="color:var(--fg-dim);">No recorded match events in this tournament yet.</small>'}
+                      </div>
+                    </td>
+                  </tr>` : '';
+                return `
+                  <tr class="ps-row ${isOpen ? 'is-open' : ''}" data-ps-key="${esc(r.key)}">
+                    <td>${r.role ? `<span class="off-role">${esc(r.role)}</span>` : esc(r.num || '–')}</td>
+                    <td>
+                      <div class="ps-pname">
+                        <b>${esc(r.name)}</b>
+                        <small><i class="ps-dot" style="background:${esc(r.teamColor)}"></i>${esc(r.teamName)}</small>
+                      </div>
+                    </td>
+                    <td>${r.matchIds.size}</td>
+                    <td><b>${r.goals}</b></td>
+                    <td>${r.assists}</td>
+                    <td>${r.fouls}</td>
+                    <td>${r.yellow}</td>
+                    <td>${r.red}</td>
+                    <td>${r.penGoals}</td>
+                  </tr>
+                  ${detailHtml}
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        `;
+
+        wrapEl.querySelectorAll('[data-ps-key]').forEach(tr => {
+          tr.addEventListener('click', () => {
+            psState.openKey = psState.openKey === tr.dataset.psKey ? '' : tr.dataset.psKey;
+            renderPlayerStats();
+          });
+        });
       }
 
       render();
