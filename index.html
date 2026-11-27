@@ -2957,6 +2957,17 @@
         m.half = state.period === 'Half-Time' ? 'ht' : (state.period === '2nd Half' || state.period.startsWith('Extra') ? '2' : '1');
         if (isLiveOrDone && !m.kickAt) m.kickAt = state.kickAt || Date.now();
         if (state.htAt) m.htAt = state.htAt;
+        // Half-time break clock for the site: an end time while it runs, the time left while paused
+        if (state.period === 'Half-Time') {
+          m.htEnd = state.clockRunning ? Date.now() + state.clockSec * 1000 : null;
+          m.htLeft = state.clockRunning ? null : state.clockSec;
+        } else { delete m.htEnd; delete m.htLeft; }
+        // Match clock for the site: follows this panel, including pauses
+        if (isLiveOrDone && state.status !== 'done' && state.period !== 'Half-Time' && state.period !== 'Penalties') {
+          const len = (state.period.startsWith('Extra') ? 5 : state.halfMinutes) * 60;
+          const elp = Math.max(0, len - state.clockSec);
+          m.rc = { p: state.period, hm: state.halfMinutes, run: !!state.clockRunning, at: state.clockRunning ? Date.now() - elp * 1000 : null, sec: state.clockRunning ? null : elp };
+        } else delete m.rc;
         if (state.h2At) m.h2At = state.h2At;
 
         // Futsal extra details (preserved cleanly alongside main app fields)
