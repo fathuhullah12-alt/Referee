@@ -1519,6 +1519,114 @@
       font-size: 12.5px;
     }
     .ps-m-badges { display: flex; flex-wrap: wrap; gap: 6px; font-weight: 700; }
+    .gk-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--teal) 9%, var(--field));
+      border: 1px solid color-mix(in srgb, var(--teal) 30%, var(--line));
+    }
+    .gk-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+    .gk-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--fg);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .gk-name small { color: var(--fg-muted); font-weight: 600; }
+    .gk-tag {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 5px;
+      background: color-mix(in srgb, var(--teal) 22%, var(--field));
+      color: var(--teal);
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      margin-left: 5px;
+      vertical-align: middle;
+    }
+    .ai-box {
+      border-radius: 16px;
+      background: linear-gradient(145deg, color-mix(in srgb, var(--teal) 10%, var(--card)), var(--card));
+      border: 1px solid color-mix(in srgb, var(--teal) 38%, var(--line));
+      padding: 14px 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .ai-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .ai-head h3 {
+      margin: 0;
+      font: 800 20px/1.1 var(--font-display);
+      text-transform: uppercase;
+      letter-spacing: .02em;
+    }
+    .ai-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 8px;
+    }
+    .ai-pick {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--field);
+      border: 1px solid var(--line-soft);
+      display: grid;
+      gap: 4px;
+    }
+    .ai-pick.is-gk {
+      border-color: color-mix(in srgb, var(--teal) 50%, var(--line));
+      background: color-mix(in srgb, var(--teal) 10%, var(--field));
+    }
+    .ai-pick-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--teal);
+    }
+    .ai-pick b { font-size: 14.5px; color: var(--fg); }
+    .ai-pick small { font-size: 12px; color: var(--fg-muted); line-height: 1.4; }
+    .ai-notes {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--field);
+      border: 1px dashed var(--line);
+      display: grid;
+      gap: 6px;
+    }
+    .ai-notes h4 {
+      margin: 0;
+      font: 800 12px/1.2 var(--font-body);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--amber-fg);
+    }
+    .ai-notes ul {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 4px;
+      font-size: 12.5px;
+      color: var(--fg-muted);
+      line-height: 1.45;
+    }
     /* Sign-in lock: only admins and managers get past it */
     .gate { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 20px; background: var(--bg); overflow-y: auto; }
     .gate[hidden] { display: none; }
@@ -1772,6 +1880,7 @@
         <select class="input ps-sort" id="ps-sort" aria-label="Sort players">
           <option value="goals">Sort: Goals</option>
           <option value="assists">Sort: Assists</option>
+          <option value="saves">Sort: GK Saves</option>
           <option value="fouls">Sort: Fouls</option>
           <option value="yellow">Sort: Yellow cards</option>
           <option value="red">Sort: Red cards</option>
@@ -1780,6 +1889,7 @@
         </select>
       </div>
       <div class="ps-kpis" id="ps-kpis"></div>
+      <div class="ai-box" id="ps-ai-box"></div>
       <div class="ps-card">
         <div class="ps-table-wrap" id="ps-table-wrap"></div>
       </div>
@@ -1945,6 +2055,7 @@
               color: '#3d8a89',
               score: 0,
               fouls: 0,
+              gk: '',
               timeouts: [false, false],
               players: [],
               officials: []
@@ -1954,6 +2065,7 @@
               color: '#2f6aa8',
               score: 0,
               fouls: 0,
+              gk: '',
               timeouts: [false, false],
               players: [],
               officials: []
@@ -2526,6 +2638,93 @@
         saveState(); render();
       }
 
+      // Goalkeeper & Saves (supports GK changes mid-match and outfield players stepping in as GK)
+      function setTeamGK(teamKey, playerName) {
+        if (guardEdit()) return;
+        const team = state.teams[teamKey];
+        const prev = team.gk || '';
+        team.gk = playerName || '';
+        if (team.gk && team.gk !== prev) {
+          addEvent(teamKey, 'info', prev ? 'GK changed' : 'GK set', `${team.gk} (${team.name})`, team.gk);
+          toast(`🧤 GK set: ${team.gk} (${team.name})`);
+        }
+        saveState(); render();
+      }
+
+      function recordSave(teamKey, playerName = '', delta = 1) {
+        if (guardEdit()) return;
+        const team = state.teams[teamKey];
+        if (delta < 0) {
+          const targetName = playerName || team.gk;
+          const p = (targetName && team.players.find(x => x.name === targetName && x.saves > 0))
+            || team.players.find(x => x.saves > 0);
+          if (!p) return;
+          p.saves = Math.max(0, (p.saves || 0) - 1);
+          const evIdx = state.events.findIndex(e => e.type === 'save' && e.team === teamKey && (!targetName || e.player === p.name));
+          if (evIdx >= 0) state.events.splice(evIdx, 1);
+          toast(`Removed 1 save (${p.name})`);
+          saveState(); render();
+          return;
+        }
+        const target = playerName || team.gk;
+        if (!target) {
+          promptSelectGK(teamKey, true);
+          return;
+        }
+        const p = team.players.find(x => x.name === target);
+        if (p) p.saves = (p.saves || 0) + 1;
+        addEvent(teamKey, 'save', 'GK Save', `${target} (${team.name})`, target);
+        toast(`🧤 Save · ${target}${p ? ` (${p.saves})` : ''}`);
+        saveState(); render();
+      }
+
+      function promptSelectGK(teamKey, recordSaveAfter = false) {
+        if (guardEdit()) return;
+        const team = state.teams[teamKey];
+        const eligible = team.players.filter(p => !p.red);
+        const btns = eligible.map(p =>
+          `<button class="pick-btn ${team.gk === p.name ? 'selected' : ''}" type="button" data-gk-pick="${esc(p.name)}">
+            <span class="p-num">${esc(p.num || '–')}</span>
+            <span>${esc(p.name)}${p.saves ? ` <small style="color:var(--teal);">(🧤${p.saves})</small>` : ''}</span>
+          </button>`
+        ).join('');
+
+        openModal(
+          `${recordSaveAfter ? 'Select GK & Record Save' : 'Select / Change GK'} · ${team.name}`,
+          `<p style="margin:0;color:var(--fg-muted);font-size:13px;">Pick any player acting as goalkeeper (including outfield / flying GK). You can switch GK anytime.</p>
+           ${btns ? `<div class="pick-grid">${btns}</div>` : '<p class="empty-note">No eligible players on roster.</p>'}
+           <input class="input" id="am-gk-custom" type="text" placeholder="Or type player name">`,
+          (body, acts) => {
+            body.querySelectorAll('[data-gk-pick]').forEach(b => {
+              b.addEventListener('click', () => {
+                const nm = b.dataset.gkPick;
+                actionModal.hidden = true;
+                if (team.gk !== nm) {
+                  const prev = team.gk;
+                  team.gk = nm;
+                  addEvent(teamKey, 'info', prev ? 'GK changed' : 'GK set', `${nm} (${team.name})`, nm);
+                }
+                if (recordSaveAfter) recordSave(teamKey, nm, 1);
+                else { saveState(); render(); toast(`🧤 GK: ${nm}`); }
+              });
+            });
+            acts.querySelector('#am-gk-ok').addEventListener('click', () => {
+              const nm = body.querySelector('#am-gk-custom').value.trim();
+              if (!nm) return;
+              actionModal.hidden = true;
+              if (team.gk !== nm) {
+                const prev = team.gk;
+                team.gk = nm;
+                addEvent(teamKey, 'info', prev ? 'GK changed' : 'GK set', `${nm} (${team.name})`, nm);
+              }
+              if (recordSaveAfter) recordSave(teamKey, nm, 1);
+              else { saveState(); render(); toast(`🧤 GK: ${nm}`); }
+            });
+          },
+          `<button class="btn btn-sm" type="button" id="am-gk-ok">${recordSaveAfter ? 'Set GK & +Save' : 'Set GK'}</button>`
+        );
+      }
+
       // Penalty Shootout Logic (No Time Limit!)
       function shootoutStats() {
         const kicks = state.shootout.kicks || [];
@@ -2985,6 +3184,17 @@
             </div>
           </div>
 
+          <div class="gk-box">
+            <div class="gk-left">
+              <span class="gk-name" title="${esc(t.gk ? 'Active GK: ' + t.gk : 'No GK selected yet')}">🧤 ${t.gk ? esc(t.gk) : '<small>Set GK</small>'}</span>
+              <button class="btn btn-ghost btn-xs" type="button" data-gk-chg="1" ${locked ? 'disabled' : ''} title="Select or change goalkeeper">${t.gk ? 'Change' : 'Pick'}</button>
+            </div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <button class="btn btn-ghost btn-xs" type="button" data-save="-1" ${locked || !t.players.some(p => p.saves > 0) ? 'disabled' : ''}>−</button>
+              <button class="btn btn-xs" type="button" data-save="1" ${locked ? 'disabled' : ''}>+ Save${t.players.reduce((s, p) => s + (p.saves || 0), 0) ? ` (${t.players.reduce((s, p) => s + (p.saves || 0), 0)})` : ''}</button>
+            </div>
+          </div>
+
           <div class="action-grid">
             <button class="act-btn ${toUsed ? 'to-used' : ''}" type="button" data-to="1" ${!toAllowed ? 'disabled title="Time-outs unavailable"' : ''}>${(state.period === '1st Half' || state.period === '2nd Half') ? `TO · ${halfLbl}${toUsed ? ' ✓' : ''}` : 'No TO'}</button>
             <button class="act-btn" type="button" data-pen="1" ${locked ? 'disabled' : ''}>Penalty</button>
@@ -3018,6 +3228,11 @@
             adjustFoul(teamKey, Number(b.dataset.foul));
           });
         });
+        const gkChg = container.querySelector('[data-gk-chg]');
+        if (gkChg) gkChg.addEventListener('click', () => promptSelectGK(teamKey, false));
+        container.querySelectorAll('[data-save]').forEach(b => {
+          b.addEventListener('click', () => recordSave(teamKey, '', Number(b.dataset.save)));
+        });
         container.querySelector('[data-to]').addEventListener('click', () => {
           if (guardEdit()) return;
           triggerTimeout(teamKey);
@@ -3039,18 +3254,21 @@
           const badges = [];
           if (p.goals) badges.push(`⚽${p.goals}`);
           if (p.assists) badges.push(`🅰️${p.assists}`);
+          if (p.saves) badges.push(`🧤${p.saves}`);
           if (p.fouls) badges.push(`⚠️${p.fouls}`);
           if (p.yellow) badges.push(`<i class="bk bk-y" style="width:7px;height:10px;"></i>×${p.yellow}`);
           if (p.red) badges.push(`<i class="bk bk-r" style="width:7px;height:10px;"></i>Out`);
+          const isActiveGk = t.gk && t.gk === p.name;
           return `
             <li class="player-row ${p.red ? 'sent-off' : ''}">
               <span class="p-num">${esc(p.num || '–')}</span>
               <span class="p-name">
-                <b>${esc(p.name)}</b>
+                <b>${esc(p.name)}${isActiveGk ? '<span class="gk-tag">GK</span>' : ''}</b>
                 ${badges.length ? `<span class="p-badges">${badges.join(' ')}</span>` : ''}
               </span>
               <span class="p-acts">
                 <button class="p-act" type="button" data-pg="${esc(p.id)}" title="${locked ? 'Match completed' : p.red ? 'Sent off — cannot return' : 'Goal (choose assist)'}" ${locked || p.red ? 'disabled' : ''}>⚽</button>
+                <button class="p-act" type="button" data-psv="${esc(p.id)}" title="${locked ? 'Match completed' : p.red ? 'Sent off' : 'GK Save (also sets player as GK)'}" ${locked || p.red ? 'disabled' : ''}>🧤</button>
                 <button class="p-act" type="button" data-py="${esc(p.id)}" title="${locked ? 'Match completed' : p.red ? 'Sent off' : 'Yellow card'}" ${locked || p.red ? 'disabled' : ''}><i class="bk bk-y" style="width:7px;height:10px;"></i></button>
                 <button class="p-act" type="button" data-pr="${esc(p.id)}" title="${locked ? 'Match completed' : p.red ? 'Already sent off' : 'Red card (2:00)'}" ${locked || p.red ? 'disabled' : ''}><i class="bk bk-r" style="width:7px;height:10px;"></i></button>
                 ${(locked || state.linked || p.fromMain) ? '' : `<button class="p-act" type="button" data-px="${esc(p.id)}" title="Remove player" style="color:var(--fg-dim);">×</button>`}
@@ -3117,6 +3335,18 @@
           if (guardEdit()) return;
           const p = t.players.find(x => x.id === b.dataset.pg);
           if (p) promptGoal(teamKey, p.name);
+        }));
+        container.querySelectorAll('[data-psv]').forEach(b => b.addEventListener('click', () => {
+          if (guardEdit()) return;
+          const p = t.players.find(x => x.id === b.dataset.psv);
+          if (p) {
+            if (t.gk !== p.name) {
+              const prev = t.gk;
+              t.gk = p.name;
+              addEvent(teamKey, 'info', prev ? 'GK changed' : 'GK set', `${p.name} (${t.name})`, p.name);
+            }
+            recordSave(teamKey, p.name, 1);
+          }
         }));
         container.querySelectorAll('[data-py]').forEach(b => b.addEventListener('click', () => {
           const p = t.players.find(x => x.id === b.dataset.py);
@@ -3362,6 +3592,7 @@
             else if (ev.type === 'yellow') ic = '<i class="bk bk-y"></i>';
             else if (ev.type === 'red') ic = '<i class="bk bk-r"></i>';
             else if (ev.type === 'foul') ic = '⚠️';
+            else if (ev.type === 'save') ic = '🧤';
             else if (ev.type === 'timeout') ic = '⏱️';
             return `
               <li class="ev-item">
@@ -3891,10 +4122,10 @@
         m.fouls = { h: state.teams.home.fouls, a: state.teams.away.fouls };
         m.timeouts = { h: state.teams.home.timeouts.filter(Boolean).length, a: state.teams.away.timeouts.filter(Boolean).length };
 
-        // Full Referee panel state saved in Firestore cloud (fouls, per-player fouls, timeouts, suspensions, shootout, full events log, clock)
-        const pfHome = {}, pfAway = {};
-        state.teams.home.players.forEach(p => { if (p.fouls) pfHome[p.name] = p.fouls; });
-        state.teams.away.players.forEach(p => { if (p.fouls) pfAway[p.name] = p.fouls; });
+        // Full Referee panel state saved in Firestore cloud (fouls, per-player fouls, GK & saves, timeouts, suspensions, shootout, full events log, clock)
+        const pfHome = {}, pfAway = {}, psHome = {}, psAway = {};
+        state.teams.home.players.forEach(p => { if (p.fouls) pfHome[p.name] = p.fouls; if (p.saves) psHome[p.name] = p.saves; });
+        state.teams.away.players.forEach(p => { if (p.fouls) pfAway[p.name] = p.fouls; if (p.saves) psAway[p.name] = p.saves; });
         m.ref = {
           status: state.status,
           period: state.period,
@@ -3908,12 +4139,14 @@
           tickAt: state.tickAt || Date.now(),
           swapped: !!state.swapped,
           timeout: state.timeout ? { team: state.timeout.team, sec: state.timeout.sec } : null,
+          gk: { h: state.teams.home.gk || '', a: state.teams.away.gk || '' },
           fouls: { h: state.teams.home.fouls, a: state.teams.away.fouls },
           timeouts: {
             h: [!!state.teams.home.timeouts[0], !!state.teams.home.timeouts[1]],
             a: [!!state.teams.away.timeouts[0], !!state.teams.away.timeouts[1]]
           },
           playerFouls: { h: pfHome, a: pfAway },
+          playerSaves: { h: psHome, a: psAway },
           suspensions: (state.suspensions || []).map(s => ({ id: s.id || uid(), team: s.team || 'home', player: s.player || '', sec: Number(s.sec) || 0, total: Number(s.total) || 120 })),
           shootout: {
             kicks: ((state.shootout && state.shootout.kicks) || []).map(k => ({
@@ -3989,7 +4222,7 @@
         }
       }
 
-      function extractSquadPlayers(team, teamId, srcGoals, srcCards, existingPlayers, playerFoulsMap) {
+      function extractSquadPlayers(team, teamId, srcGoals, srcCards, existingPlayers, playerFoulsMap, playerSavesMap) {
         const raw = Array.isArray(team && team.players) ? team.players : [];
         const prevById = new Map();
         const prevByName = new Map();
@@ -4009,12 +4242,14 @@
           const yCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'y').length : (prev ? prev.yellow : 0);
           const rCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'r').length : (prev ? prev.red : 0);
           const fCount = playerFoulsMap && playerFoulsMap[name] != null ? Number(playerFoulsMap[name]) || 0 : (prev ? (prev.fouls || 0) : 0);
+          const sCount = playerSavesMap && playerSavesMap[name] != null ? Number(playerSavesMap[name]) || 0 : (prev ? (prev.saves || 0) : 0);
           return {
             id,
             num: numVal !== '' && numVal != null ? String(numVal) : '',
             name,
             goals: gCount,
             assists: aCount,
+            saves: sCount,
             yellow: yCount,
             red: rCount,
             fouls: fCount,
@@ -4093,7 +4328,9 @@
         const srcCards = isPlayed ? (m.cards || []) : (m.lcards || []);
         const pfHome = (ref && ref.playerFouls && ref.playerFouls.h) || null;
         const pfAway = (ref && ref.playerFouls && ref.playerFouls.a) || null;
-        const mapPlayers = (team, teamId, pfMap) => extractSquadPlayers(team, teamId, srcGoals, srcCards, null, pfMap);
+        const psHome = (ref && ref.playerSaves && ref.playerSaves.h) || null;
+        const psAway = (ref && ref.playerSaves && ref.playerSaves.a) || null;
+        const mapPlayers = (team, teamId, pfMap, psMap) => extractSquadPlayers(team, teamId, srcGoals, srcCards, null, pfMap, psMap);
 
         // Use full cloud-saved events log when available; fall back to reconstructing from goals/cards for older matches
         let restoredEvents = null;
@@ -4162,8 +4399,9 @@
           color: homeTeam.c1 || '#3d8a89',
           score: isPlayed ? m.hs : (m.lh || 0),
           fouls: (ref && ref.fouls && ref.fouls.h != null) ? ref.fouls.h : ((m.fouls && m.fouls.h) || 0),
+          gk: (ref && ref.gk && ref.gk.h) || '',
           timeouts: toArr(ref && ref.timeouts && ref.timeouts.h, (m.timeouts && m.timeouts.h) || 0),
-          players: mapPlayers(homeTeam, m.home, pfHome),
+          players: mapPlayers(homeTeam, m.home, pfHome, psHome),
           officials: extractSquadOfficials(homeTeam, m.home, srcCards)
         };
         fresh.teams.away = {
@@ -4171,8 +4409,9 @@
           color: awayTeam.c1 || '#2f6aa8',
           score: isPlayed ? m.as : (m.la || 0),
           fouls: (ref && ref.fouls && ref.fouls.a != null) ? ref.fouls.a : ((m.fouls && m.fouls.a) || 0),
+          gk: (ref && ref.gk && ref.gk.a) || '',
           timeouts: toArr(ref && ref.timeouts && ref.timeouts.a, (m.timeouts && m.timeouts.a) || 0),
-          players: mapPlayers(awayTeam, m.away, pfAway),
+          players: mapPlayers(awayTeam, m.away, pfAway, psAway),
           officials: extractSquadOfficials(awayTeam, m.away, srcCards)
         };
         fresh.events = restoredEvents;
@@ -4522,6 +4761,7 @@
         const tSel = document.getElementById('ps-tournament');
         const teamSel = document.getElementById('ps-team');
         const kpisEl = document.getElementById('ps-kpis');
+        const aiEl = document.getElementById('ps-ai-box');
         const wrapEl = document.getElementById('ps-table-wrap');
 
         const tours = (cloud.tournaments || []).filter(t => t && t.squads && t.squads.length);
@@ -4529,6 +4769,7 @@
           tSel.innerHTML = '<option value="">No tournaments loaded</option>';
           teamSel.innerHTML = '<option value="">All teams</option>';
           kpisEl.innerHTML = '';
+          if (aiEl) aiEl.hidden = true;
           wrapEl.innerHTML = '<p class="empty-note" style="padding:28px;">No tournaments available yet. Connect to Firestore to view player match data.</p>';
           return;
         }
@@ -4568,6 +4809,9 @@
               role: role || '',
               goals: 0,
               assists: 0,
+              saves: 0,
+              playedGk: 0,
+              gkConceded: 0,
               fouls: 0,
               yellow: 0,
               red: 0,
@@ -4596,7 +4840,7 @@
 
         // Aggregate across EVERY match in the tournament
         const matches = tour.matches || [];
-        let completedMatches = 0, liveMatches = 0, totalGoals = 0, totalYellow = 0, totalRed = 0, totalFouls = 0;
+        let completedMatches = 0, liveMatches = 0, totalGoals = 0, totalSaves = 0, totalYellow = 0, totalRed = 0, totalFouls = 0;
 
         matches.forEach((m, idx) => {
           const isPlayed = m.hs != null && m.as != null;
@@ -4627,7 +4871,7 @@
                 status: mStatus,
                 opp: isHome ? aName : hName,
                 score: isHome ? `${hs}–${as}` : `${as}–${hs}`,
-                goals: 0, assists: 0, fouls: 0, yellow: 0, red: 0, penGoals: 0
+                goals: 0, assists: 0, saves: 0, fouls: 0, yellow: 0, red: 0, penGoals: 0
               });
             }
             return perMatch.get(p.key);
@@ -4653,7 +4897,7 @@
             else { r.yellow++; r.p.yellow++; totalYellow++; }
           });
 
-          // Fouls & shootout from cloud m.ref
+          // Fouls, GK Saves, Active GK & Shootout from cloud m.ref
           if (m.ref) {
             const pf = m.ref.playerFouls || {};
             Object.entries(pf.h || {}).forEach(([nm, cnt]) => {
@@ -4668,6 +4912,31 @@
               const r = getRec(m.away, nm);
               if (r) { r.fouls += n; r.p.fouls += n; totalFouls += n; }
             });
+
+            const ps = m.ref.playerSaves || {};
+            Object.entries(ps.h || {}).forEach(([nm, cnt]) => {
+              const n = Number(cnt) || 0;
+              if (!n) return;
+              const r = getRec(m.home, nm);
+              if (r) { r.saves += n; r.p.saves += n; r.p.playedGk++; r.p.gkConceded += as; totalSaves += n; }
+            });
+            Object.entries(ps.a || {}).forEach(([nm, cnt]) => {
+              const n = Number(cnt) || 0;
+              if (!n) return;
+              const r = getRec(m.away, nm);
+              if (r) { r.saves += n; r.p.saves += n; r.p.playedGk++; r.p.gkConceded += hs; totalSaves += n; }
+            });
+            if (m.ref.gk) {
+              if (m.ref.gk.h && !(ps.h && ps.h[m.ref.gk.h])) {
+                const r = getRec(m.home, m.ref.gk.h);
+                if (r) { r.p.playedGk++; r.p.gkConceded += as; }
+              }
+              if (m.ref.gk.a && !(ps.a && ps.a[m.ref.gk.a])) {
+                const r = getRec(m.away, m.ref.gk.a);
+                if (r) { r.p.playedGk++; r.p.gkConceded += hs; }
+              }
+            }
+
             const kicks = (m.ref.shootout && m.ref.shootout.kicks) || [];
             kicks.forEach(k => {
               if (!k.scored || !k.player) return;
@@ -4682,6 +4951,105 @@
             rec.p.matches.push(rec);
           });
         });
+
+        // ===== AI Best 5 Selection & Scouting Breakdown (1 GK + 4 Outfield Players) =====
+        if (aiEl) {
+          const allPlayers = Array.from(people.values()).filter(p => !p.role);
+          const gkCandidates = allPlayers
+            .filter(p => p.saves > 0 || p.playedGk > 0)
+            .map(p => {
+              const mCnt = Math.max(1, p.playedGk || p.matchIds.size);
+              const savesPerM = p.saves / mCnt;
+              const concededPerM = p.gkConceded / mCnt;
+              const score = +(p.saves * 3.0 + savesPerM * 2.0 + p.goals * 2.5 + p.assists * 2.0 - concededPerM * 0.9 - p.fouls * 0.3 - p.yellow * 1.5 - p.red * 4.0).toFixed(1);
+              return { p, score, savesPerM: savesPerM.toFixed(1) };
+            })
+            .sort((a, b) => b.score - a.score || b.p.saves - a.p.saves);
+
+          const bestGk = gkCandidates[0] || null;
+          const gkRunnerUp = gkCandidates[1] || null;
+
+          const outfieldCandidates = allPlayers
+            .filter(p => (!bestGk || p.key !== bestGk.p.key) && (p.goals > 0 || p.assists > 0 || p.penGoals > 0 || p.matchIds.size > 0))
+            .map(p => {
+              const score = +(p.goals * 4.0 + p.assists * 3.0 + p.penGoals * 1.5 + p.saves * 1.5 + p.matchIds.size * 1.0 - p.fouls * 0.35 - p.yellow * 1.5 - p.red * 4.0).toFixed(1);
+              const notes = [];
+              if (p.goals >= 3) notes.push('Clinical scorer');
+              else if (p.goals > 0) notes.push(`${p.goals} goal${p.goals > 1 ? 's' : ''}`);
+              if (p.assists >= 2) notes.push('Key playmaker');
+              else if (p.assists > 0) notes.push(`${p.assists} assist${p.assists > 1 ? 's' : ''}`);
+              if (p.penGoals > 0) notes.push(`${p.penGoals} shootout goal${p.penGoals > 1 ? 's' : ''}`);
+              if (p.saves > 0) notes.push(`Flying GK (${p.saves} saves)`);
+              if (p.yellow === 0 && p.red === 0 && p.fouls <= 2) notes.push('Clean discipline');
+              if (p.red > 0) notes.push('Red card penalty applied');
+              return { p, score, note: notes.join(' · ') || 'Active squad contributor' };
+            })
+            .sort((a, b) => b.score - a.score || b.p.goals - a.p.goals || b.p.assists - a.p.assists);
+
+          const best4 = outfieldCandidates.slice(0, 4);
+          const runnersUp = outfieldCandidates.slice(4, 6);
+
+          aiEl.hidden = false;
+          aiEl.innerHTML = `
+            <div class="ai-head">
+              <div>
+                <p class="kicker" style="color:var(--teal);">DATA-DRIVEN TOURNAMENT SCOUTING</p>
+                <h3>✨ AI Best 5 Breakdown (1 GK + 4 Players)</h3>
+              </div>
+              <span class="tag t-green" style="font-size:10.5px;">${esc(tour.name || 'Tournament')}</span>
+            </div>
+
+            <div class="ai-grid">
+              ${bestGk ? `
+                <div class="ai-pick is-gk">
+                  <div class="ai-pick-top"><span>🧤 Best Goalkeeper</span><span>Rating ${bestGk.score}</span></div>
+                  <b>${bestGk.p.num ? '#' + esc(bestGk.p.num) + ' ' : ''}${esc(bestGk.p.name)}</b>
+                  <small><i class="ps-dot" style="background:${esc(bestGk.p.teamColor)}"></i> ${esc(bestGk.p.teamName)}</small>
+                  <small>🧤 <b>${bestGk.p.saves} saves</b> (${bestGk.savesPerM}/match) · ${bestGk.p.matchIds.size} match${bestGk.p.matchIds.size === 1 ? '' : 'es'} · 🟨${bestGk.p.yellow} 🟥${bestGk.p.red}</small>
+                </div>` : `
+                <div class="ai-pick is-gk">
+                  <div class="ai-pick-top"><span>🧤 Best Goalkeeper</span><span>No GK data yet</span></div>
+                  <b>Record GK Saves</b>
+                  <small>Use the <b>+ Save</b> button in Match Control during matches to automatically rank and pick the Best GK.</small>
+                </div>`}
+
+              ${best4.length ? best4.map((x, i) => `
+                <div class="ai-pick">
+                  <div class="ai-pick-top"><span>⭐ Outfield #${i + 1}</span><span>Impact ${x.score}</span></div>
+                  <b>${x.p.num ? '#' + esc(x.p.num) + ' ' : ''}${esc(x.p.name)}</b>
+                  <small><i class="ps-dot" style="background:${esc(x.p.teamColor)}"></i> ${esc(x.p.teamName)}</small>
+                  <small>⚽ <b>${x.p.goals}</b> · 🅰️ <b>${x.p.assists}</b> · ⚠️${x.p.fouls} · 🟨${x.p.yellow} 🟥${x.p.red}</small>
+                  <small style="color:var(--teal);">${esc(x.note)}</small>
+                </div>
+              `).join('') : `
+                <div class="ai-pick">
+                  <div class="ai-pick-top"><span>⭐ Outfield Players</span><span>Waiting for stats</span></div>
+                  <b>No match stats yet</b>
+                  <small>Record goals, assists, fouls, and cards in matches to generate the AI Best 4 outfield picks.</small>
+                </div>`}
+            </div>
+
+            ${(gkRunnerUp || runnersUp.length) ? `
+              <div style="font-size:12px;color:var(--fg-muted);">
+                <b>Close Contenders:</b>
+                ${gkRunnerUp ? `🧤 GK: <b>${esc(gkRunnerUp.p.name)}</b> (${gkRunnerUp.p.saves} saves, ${esc(gkRunnerUp.p.teamName)})` : ''}
+                ${gkRunnerUp && runnersUp.length ? ' · ' : ''}
+                ${runnersUp.map(x => `<b>${esc(x.p.name)}</b> (${x.p.goals}G ${x.p.assists}A, ${esc(x.p.teamName)})`).join(' · ')}
+              </div>` : ''}
+
+            <div class="ai-notes">
+              <h4>⚠️ Other Things to Look Into Before Finalizing Best 5</h4>
+              <ul>
+                <li><b>Defensive Work Rate &amp; Interceptions:</b> Marking, pressing, shot blocks, and tracking back aren't captured by goals/assists alone.</li>
+                <li><b>Big-Match &amp; Knockout Impact:</b> Weigh performances in Semi-Finals, Finals, and close matches higher than one-sided group games.</li>
+                <li><b>Minutes Played &amp; Consistency:</b> Check whether a player performed across the full tournament or missed key matches.</li>
+                <li><b>Tactical Role &amp; Build-Up Play:</b> Fixos and Pivots who control tempo, hold the ball, and create hockey assists add huge value beyond raw scores.</li>
+                <li><b>Goalkeeper Command &amp; Distribution:</b> Consider 1v1 positioning, sweeper-keeper play, distribution accuracy, and clean sheets alongside raw saves.</li>
+                <li><b>Sportsmanship &amp; Leadership:</b> Factor in on-court discipline, teamwork, and respect toward referees and opponents.</li>
+              </ul>
+            </div>
+          `;
+        }
 
         // Filter & sort rows
         let rows = Array.from(people.values());
@@ -4706,6 +5074,7 @@
           <div class="ps-kpi"><strong>${completedMatches}${liveMatches ? ` <span style="font-size:13px;color:var(--live);">+${liveMatches} live</span>` : ''}</strong><small>Matches Played</small></div>
           <div class="ps-kpi"><strong>${rows.length}</strong><small>Players / Officials</small></div>
           <div class="ps-kpi"><strong>${totalGoals}</strong><small>Goals</small></div>
+          <div class="ps-kpi"><strong>${totalSaves}</strong><small>GK Saves</small></div>
           <div class="ps-kpi"><strong>${totalFouls}</strong><small>Player Fouls</small></div>
           <div class="ps-kpi"><strong>${totalYellow} / ${totalRed}</strong><small>Cards (Y / R)</small></div>
         `;
@@ -4724,6 +5093,7 @@
                 <th>Matches</th>
                 <th>⚽ Goals</th>
                 <th>🅰️ Assists</th>
+                <th>🧤 Saves</th>
                 <th>⚠️ Fouls</th>
                 <th>🟨 Y</th>
                 <th>🟥 R</th>
@@ -4735,12 +5105,13 @@
                 const isOpen = psState.openKey === r.key;
                 const detailHtml = isOpen ? `
                   <tr class="ps-detail-row">
-                    <td colspan="9">
+                    <td colspan="10">
                       <div class="ps-detail">
                         ${r.matches.length ? r.matches.map(m => {
                           const b = [];
                           if (m.goals) b.push(`⚽ ${m.goals}`);
                           if (m.assists) b.push(`🅰️ ${m.assists}`);
+                          if (m.saves) b.push(`🧤 ${m.saves}`);
                           if (m.fouls) b.push(`⚠️ ${m.fouls}`);
                           if (m.yellow) b.push(`🟨 ${m.yellow}`);
                           if (m.red) b.push(`🟥 ${m.red}`);
@@ -4767,6 +5138,7 @@
                     <td>${r.matchIds.size}</td>
                     <td><b>${r.goals}</b></td>
                     <td>${r.assists}</td>
+                    <td><b>${r.saves}</b></td>
                     <td>${r.fouls}</td>
                     <td>${r.yellow}</td>
                     <td>${r.red}</td>
