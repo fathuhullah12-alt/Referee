@@ -1299,9 +1299,34 @@
       .rep-sigs { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 34px; }
       .rep-sigs div { border-top: 1px solid #444; padding-top: 6px; font-size: 12px; color: #444; }
     }
+    /* Sign-in lock: only admins and managers get past it */
+    .gate { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 20px; background: var(--bg); overflow-y: auto; }
+    .gate[hidden] { display: none; }
+    .gate-box { width: min(100%, 380px); display: grid; gap: 14px; padding: 26px 22px; border-radius: 22px; background: var(--bg-raised); border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+    .gate-box h1 { margin: 0; font: 800 30px/1 var(--font-display); text-transform: uppercase; color: var(--fg); }
+    .gate-box p { margin: 0; color: var(--fg-muted); font-size: 14px; line-height: 1.45; }
+    .gate-box form { display: grid; gap: 10px; }
+    .gate-box label { display: grid; gap: 4px; }
+    .gate-ic { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--teal); color: #fff; font-size: 26px; }
+    .gate-err { color: #e0533d; font-size: 13.5px; }
+    body.locked { overflow: hidden; }
   </style>
 </head>
-<body>
+<body class="locked">
+  <div class="gate" id="gate">
+    <div class="gate-box">
+      <div class="gate-ic" aria-hidden="true">🔒</div>
+      <h1>Referee panel</h1>
+      <p id="gate-msg">Checking sign-in…</p>
+      <form id="gate-form" hidden>
+        <label><span class="kicker">Member ID</span><input class="input" id="gate-id" type="text" placeholder="e.g. M-1001" autocapitalize="characters" autocomplete="username" required></label>
+        <label><span class="kicker">Password</span><input class="input" id="gate-pass" type="password" placeholder="Password" autocomplete="current-password" required></label>
+        <p class="gate-err" id="gate-err" hidden></p>
+        <button class="btn" type="submit" id="gate-submit">Sign in</button>
+      </form>
+      <button class="btn btn-ghost btn-sm" type="button" id="gate-out" hidden>Sign out</button>
+    </div>
+  </div>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
       <symbol id="ic-futsal" viewBox="0 0 24 24">
@@ -3226,6 +3251,8 @@
           cloud.member = null;
           updateSyncPill();
           renderConnectModal();
+          connectModal.hidden = true;
+          updateGate();
           toast('Signed out');
         });
       }
@@ -3234,6 +3261,56 @@
         connectModal.hidden = false;
         renderConnectModal();
       });
+
+      // Sign-in lock: the panel stays covered until an Admin or Manager signs in
+      const gate = document.getElementById('gate');
+      const gateMsg = document.getElementById('gate-msg');
+      const gateForm = document.getElementById('gate-form');
+      const gateErr = document.getElementById('gate-err');
+      const gateOut = document.getElementById('gate-out');
+      let authChecked = false;
+      function updateGate() {
+        const ok = !!(cloud.member && (cloud.member.role === 'admin' || cloud.member.role === 'manager'));
+        gate.hidden = ok;
+        document.body.classList.toggle('locked', !ok);
+        if (ok) return;
+        gateErr.hidden = true;
+        if (!/^https?:$/.test(location.protocol)) {
+          gateMsg.textContent = 'Open this panel at referee.noonuprc.com to sign in.';
+          gateForm.hidden = true; gateOut.hidden = true; return;
+        }
+        if (!cloud.ready || !authChecked) { gateMsg.textContent = 'Checking sign-in…'; gateForm.hidden = true; gateOut.hidden = true; return; }
+        if (cloud.user && cloud.member) {
+          gateMsg.textContent = 'You are signed in as ' + (cloud.member.name || cloud.member.id) + '. Only Admin and Manager accounts can use the referee panel.';
+          gateForm.hidden = true; gateOut.hidden = false; return;
+        }
+        gateMsg.textContent = 'Sign in with your Admin or Manager Member ID to use the referee panel.';
+        gateForm.hidden = false; gateOut.hidden = true;
+        document.getElementById('gate-submit').disabled = false;
+      }
+      gateForm.addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = document.getElementById('gate-submit');
+        const id = document.getElementById('gate-id').value.trim().toUpperCase();
+        const pass = document.getElementById('gate-pass').value;
+        gateErr.hidden = true; btn.disabled = true;
+        try {
+          const doc = await cloud.db.collection('members').doc(id).get();
+          if (!doc.exists) throw new Error('Member ID not found.');
+          const m = doc.data();
+          if (m.role !== 'admin' && m.role !== 'manager') throw new Error('Only Admin or Manager accounts can use the referee panel.');
+          await cloud.auth.signInWithEmailAndPassword(fbEmail(id, m.v || 0), pass);
+          cloud.member = Object.assign({ id }, m);
+          updateSyncPill(); updateGate();
+          toast(`Signed in as ${m.name || id}`);
+        } catch (err) {
+          const c = err && err.code || '';
+          gateErr.textContent = /wrong-password|invalid-credential|invalid-login/.test(c) ? 'Wrong password. Try again.' : (err.message || 'Sign in failed. Check ID and password.');
+          gateErr.hidden = false; btn.disabled = false;
+        }
+      });
+      gateOut.addEventListener('click', async () => { try { await cloud.auth.signOut(); } catch (e) {} cloud.member = null; updateGate(); });
+      updateGate();
 
       // Initialize Firebase when served over http/https
       if (/^https?:$/.test(location.protocol)) {
@@ -3250,9 +3327,11 @@
 
             cloud.auth.onAuthStateChanged(async user => {
               cloud.user = user || null;
+              authChecked = true;
               if (!user) {
                 cloud.member = null;
                 updateSyncPill();
+                updateGate();
                 return;
               }
               try {
@@ -3264,6 +3343,7 @@
                 }
               } catch (e) {}
               updateSyncPill();
+              updateGate();
               if (!connectModal.hidden) renderConnectModal();
             });
 
@@ -3284,7 +3364,7 @@
 
             updateSyncPill();
           })
-          .catch(() => {});
+          .catch(() => { gateMsg.textContent = 'Could not reach the club database. Check your internet and reload.'; });
       }
 
       render();
