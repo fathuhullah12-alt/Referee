@@ -1818,8 +1818,8 @@
         }
 
         if (changed) {
-          // Clock ticks stay on this device; only real match changes are sent to the site
-          saveState(true);
+          // Clock ticks stay on this device (no cloud sync, no "Saving…" flash)
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
           renderClockAndTimers();
         }
       }, 1000);
