@@ -1137,7 +1137,9 @@
       body:not(.force-landscape) .arena { grid-template-columns: 1fr 1fr; }
       body:not(.force-landscape) .clock-panel { grid-column: 1 / -1; order: -1; }
       body:not(.force-landscape) .deck { grid-template-columns: 1fr; overflow: visible; }
-      body:not(.force-landscape) .deck-col { overflow: visible; }
+      body:not(.force-landscape) .deck { flex: none; min-height: auto; }
+      body:not(.force-landscape) .deck-col > * { flex: none; min-height: auto; }
+      body:not(.force-landscape) .deck-col { overflow: visible; min-height: auto; }
       body:not(.force-landscape) .scroll-area { overflow: visible; max-height: none; }
       body:not(.force-landscape) .action-grid { grid-template-columns: repeat(2, 1fr); }
     }
