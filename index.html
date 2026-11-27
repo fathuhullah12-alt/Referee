@@ -1818,7 +1818,8 @@
         }
 
         if (changed) {
-          saveState();
+          // Clock ticks stay on this device; only real match changes are sent to the site
+          saveState(true);
           renderClockAndTimers();
         }
       }, 1000);
@@ -2987,10 +2988,14 @@
           if (isLiveOrDone && (!copy.status || copy.status === 'upcoming')) copy.status = 'live';
         }
 
+        // Nothing new for the site: skip the write
+        const sig = JSON.stringify([copy.status, m]);
+        if (sig === cloud.lastSig) return;
         cloud.syncing = true;
         updateSyncPill();
         try {
           await cloud.db.collection('tournaments').doc(copy.id).set(copy);
+          cloud.lastSig = sig;
         } catch (e) {
           toast('Sync error: check permissions or internet connection.');
         } finally {
