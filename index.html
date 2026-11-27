@@ -767,6 +767,69 @@
     }
     .clock-nudge button:hover { color: var(--fg); border-color: var(--line-hover); }
 
+    .added-time-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin: -2px auto 0;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--gold) 16%, var(--field));
+      border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
+      color: var(--amber-fg);
+      font: 800 11px/1.2 var(--font-body);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .added-time-badge.is-active {
+      background: color-mix(in srgb, var(--live) 18%, var(--field));
+      border-color: color-mix(in srgb, var(--live) 50%, var(--line));
+      color: var(--live);
+    }
+    .added-time-badge[hidden] { display: none; }
+    .added-time-badge button {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      padding: 0 2px;
+      line-height: 1;
+      opacity: .75;
+    }
+    .added-time-badge button:hover { opacity: 1; }
+
+    .added-time-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .added-time-row[hidden] { display: none; }
+    .added-time-lbl {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      margin-right: 2px;
+    }
+    .added-time-row button {
+      padding: 2px 7px;
+      border-radius: 6px;
+      border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--line));
+      background: color-mix(in srgb, var(--gold) 10%, var(--field));
+      color: var(--amber-fg);
+      font: 700 11px var(--font-body);
+      cursor: pointer;
+    }
+    .added-time-row button:hover {
+      background: color-mix(in srgb, var(--gold) 20%, var(--field));
+      border-color: color-mix(in srgb, var(--gold) 55%, var(--line));
+    }
+
     .clock-btns { display: grid; grid-template-columns: 1.5fr 1fr; gap: 6px; }
 
     .clock-settings {
@@ -1459,12 +1522,24 @@
           <!-- Standard Timed Mode -->
           <div id="timed-mode-ui" style="display:grid;gap:8px;">
             <div class="clock-display" id="clock-display">20:00</div>
+            <div class="added-time-badge" id="added-time-badge" hidden>
+              <span id="added-time-text">+1' ADDED TIME</span>
+              <button type="button" id="btn-clear-added" title="Clear added time">×</button>
+            </div>
 
             <div class="clock-nudge">
               <button type="button" data-nudge="-60">-1m</button>
               <button type="button" data-nudge="-1">-1s</button>
               <button type="button" data-nudge="1">+1s</button>
               <button type="button" data-nudge="60">+1m</button>
+            </div>
+
+            <div class="added-time-row" id="added-time-row">
+              <span class="added-time-lbl">Added:</span>
+              <button type="button" data-add-et="1">+1m</button>
+              <button type="button" data-add-et="2">+2m</button>
+              <button type="button" data-add-et="3">+3m</button>
+              <button type="button" id="btn-add-et-custom">+…</button>
             </div>
 
             <div class="clock-btns">
@@ -1483,7 +1558,7 @@
               </label>
               <label class="mini-field">
                 <span>Break (m)</span>
-                <input class="input" type="number" id="inp-break-mins" min="1" max="30" value="15">
+                <input class="input" type="number" id="inp-break-mins" min="1" max="30" value="5">
               </label>
             </div>
           </div>
@@ -1664,7 +1739,10 @@
           status: 'upcoming', // upcoming | live | halftime | done
           period: '1st Half',
           halfMinutes: 20,
-          breakMinutes: 15,
+          breakMinutes: 5,
+          breakCustom: false,
+          addedTime: 0, // optional stoppage/added seconds added to current half
+          et2Done: false, // true once Extra Time 2 finishes at 00:00
           clockSec: 20 * 60,
           clockRunning: false,
           swapped: false,
@@ -1710,7 +1788,9 @@
         try {
           const raw = localStorage.getItem(STORAGE_KEY);
           if (!raw) return defaultState();
-          return Object.assign(defaultState(), JSON.parse(raw));
+          const parsed = Object.assign(defaultState(), JSON.parse(raw));
+          if (!parsed.breakCustom && parsed.breakMinutes === 15) parsed.breakMinutes = 5;
+          return parsed;
         } catch (e) {
           return defaultState();
         }
@@ -1827,6 +1907,7 @@
 
             if (state.clockSec === 0) {
               state.clockRunning = false;
+              if (state.period === 'Extra Time 2') state.et2Done = true;
               playBuzzer(1100, 380);
               toast(`${state.period} clock reached 00:00`);
             }
@@ -2691,25 +2772,80 @@
         }));
       }
 
+      function isDraw() {
+        return state.teams.home.score === state.teams.away.score;
+      }
+
+      function isPlayingHalf() {
+        return state.period === '1st Half' || state.period === '2nd Half' || state.period === 'Extra Time 1' || state.period === 'Extra Time 2';
+      }
+
       function isPeriodSwitchLocked() {
         if (state.period === 'Penalties') return false;
         if (state.status === 'upcoming') return false;
         return state.clockSec > 0;
       }
 
+      function canEnterPeriod(target) {
+        if (target === state.period) return true;
+        if (target === 'Extra Time 1') return isDraw();
+        if (target === 'Extra Time 2') return isDraw() && (state.period === 'Extra Time 1' || state.et2Done);
+        if (target === 'Penalties') return isDraw() && ((state.period === 'Extra Time 2' && state.clockSec === 0) || !!state.et2Done);
+        return true;
+      }
+
+      function addHalfExtraTime(mins) {
+        const m = Math.max(1, Math.min(30, parseInt(mins, 10) || 0));
+        if (!m || !isPlayingHalf()) return;
+        const sec = m * 60;
+        state.addedTime = (state.addedTime || 0) + sec;
+        state.clockSec += sec;
+        addEvent('home', 'info', `Added time (+${m}')`, `${state.period} · +${m} min added time`);
+        saveState();
+        renderClockAndTimers();
+        renderEvents();
+        toast(`+${m} min added time (${state.period})`);
+      }
+
+      function completeMatch() {
+        state.status = 'done';
+        state.clockRunning = false;
+        state.addedTime = 0;
+        const so = shootoutStats();
+        const penNote = state.shootout.kicks.length && isDraw() ? ` (Pens ${so.hScore}–${so.aScore})` : '';
+        addEvent('home', 'info', 'Match completed', `${state.teams.home.name} ${state.teams.home.score} – ${state.teams.away.score} ${state.teams.away.name}${penNote}`);
+        playBuzzer(900, 380);
+        saveState(true);
+        render();
+        if (state.linked && canPushCloud()) {
+          pushMatchToMainApp().then(() => toast('Match marked completed — synced to main app!'));
+        } else {
+          toast('Match marked completed!');
+        }
+      }
+
       function renderClockAndTimers() {
         const isPen = state.period === 'Penalties';
         const locked = isPeriodSwitchLocked();
+        const draw = isDraw();
         const selP = document.getElementById('sel-period');
         const nextP = document.getElementById('btn-next-period');
         if (selP) {
           selP.disabled = locked;
           selP.title = locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Match period';
+          Array.from(selP.options).forEach(opt => {
+            opt.disabled = !canEnterPeriod(opt.value);
+          });
         }
         if (nextP) {
           nextP.disabled = locked;
           nextP.className = (!locked && !isPen && state.status !== 'upcoming') ? 'btn btn-xs' : 'btn btn-ghost btn-xs';
           nextP.title = locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Advance period';
+          if (state.period === '2nd Half') nextP.textContent = draw ? 'Extra Time ›' : 'Complete ✓';
+          else if (state.period === 'Extra Time 1') nextP.textContent = 'ET 2 ›';
+          else if (state.period === 'Extra Time 2') nextP.textContent = draw ? 'Penalties ›' : 'Complete ✓';
+          else if (state.period === 'Penalties') nextP.textContent = 'Complete ✓';
+          else nextP.textContent = 'Next ›';
         }
         const panel = document.getElementById('clock-panel');
         panel.classList.toggle('is-running', state.clockRunning && !isPen);
@@ -2724,6 +2860,25 @@
           const disp = document.getElementById('clock-display');
           disp.textContent = fmtClock(state.clockSec);
           disp.classList.toggle('is-zero', state.clockSec === 0);
+
+          const addRow = document.getElementById('added-time-row');
+          const addBadge = document.getElementById('added-time-badge');
+          const addText = document.getElementById('added-time-text');
+          const showAdd = isPlayingHalf() && state.status !== 'done';
+          if (addRow) addRow.hidden = !showAdd;
+          const addSec = state.addedTime || 0;
+          if (addBadge && addText) {
+            const hasAdd = showAdd && addSec > 0;
+            addBadge.hidden = !hasAdd;
+            if (hasAdd) {
+              const mins = Math.ceil(addSec / 60);
+              const inAdded = state.clockSec > 0 && state.clockSec <= addSec;
+              addBadge.classList.toggle('is-active', inAdded);
+              addText.textContent = inAdded
+                ? `IN ADDED TIME (+${mins}' · ${state.period})`
+                : `+${mins}' ADDED TIME (${state.period})`;
+            }
+          }
 
           const toggleBtn = document.getElementById('btn-clock-toggle');
           toggleBtn.className = state.clockRunning ? 'btn btn-live' : 'btn';
@@ -2814,7 +2969,7 @@
           upcoming: ['UPCOMING', 'upcoming'],
           live: ['LIVE', 'live'],
           halftime: ['HALF-TIME', 'halftime'],
-          done: ['FULL TIME', 'done']
+          done: ['COMPLETED', 'done']
         };
         const [stLabel, stCls] = statusMap[state.status] || statusMap.upcoming;
         badge.textContent = stLabel;
@@ -2828,7 +2983,7 @@
           matchBtn.textContent = 'Reopen';
           matchBtn.className = 'btn btn-ghost btn-sm';
         } else {
-          matchBtn.textContent = 'Finish';
+          matchBtn.textContent = 'Mark completed';
           matchBtn.className = 'btn btn-live btn-sm';
         }
 
@@ -2866,17 +3021,14 @@
           addEvent('home', 'info', 'Match started', `${state.teams.home.name} vs ${state.teams.away.name}`);
           playBuzzer(300, 520);
           toast('Match started!');
+          saveState(); render();
         } else if (state.status === 'done') {
           state.status = 'live';
           toast('Match reopened');
+          saveState(); render();
         } else {
-          state.status = 'done';
-          state.clockRunning = false;
-          addEvent('home', 'info', 'Full time', `${state.teams.home.name} ${state.teams.home.score} – ${state.teams.away.score} ${state.teams.away.name}`);
-          playBuzzer(900, 380);
-          toast('Match marked Full Time — standings updated!');
+          completeMatch();
         }
-        saveState(); render();
       });
 
       // Next unplayed match (both teams set) after this one, in match order
@@ -2908,7 +3060,8 @@
 
       document.getElementById('btn-clock-reset').addEventListener('click', () => {
         state.clockRunning = false;
-        state.clockSec = (state.period === 'Half-Time' ? state.breakMinutes : state.halfMinutes) * 60;
+        state.addedTime = 0;
+        state.clockSec = (state.period === 'Half-Time' ? state.breakMinutes : (state.period.startsWith('Extra') ? 5 : state.halfMinutes)) * 60;
         saveState(); renderClockAndTimers();
         toast('Clock reset');
       });
@@ -2920,14 +3073,66 @@
         });
       });
 
+      document.querySelectorAll('[data-add-et]').forEach(b => {
+        b.addEventListener('click', () => addHalfExtraTime(Number(b.dataset.addEt)));
+      });
+
+      document.getElementById('btn-add-et-custom').addEventListener('click', () => {
+        if (!isPlayingHalf()) return;
+        openModal(`Add Extra Time · ${state.period}`, `
+          <p style="margin:0;color:var(--fg-muted);font-size:13.5px;">Add labeled stoppage / extra time to <b>${esc(state.period)}</b>.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            ${[1, 2, 3, 4, 5].map(n => `<button class="btn btn-ghost btn-sm" type="button" data-q-et="${n}">+${n} min</button>`).join('')}
+          </div>
+          <label style="display:grid;gap:4px;">
+            <span class="kicker">Custom minutes</span>
+            <input class="input" id="m-et-mins" type="number" min="1" max="30" value="1" inputmode="numeric">
+          </label>
+        `, (body, acts) => {
+          body.querySelectorAll('[data-q-et]').forEach(btn => btn.addEventListener('click', () => {
+            actionModal.hidden = true;
+            addHalfExtraTime(Number(btn.dataset.qEt));
+          }));
+          const ok = document.createElement('button');
+          ok.className = 'btn btn-sm';
+          ok.type = 'button';
+          ok.textContent = 'Add time';
+          ok.addEventListener('click', () => {
+            const v = parseInt(body.querySelector('#m-et-mins').value, 10) || 1;
+            actionModal.hidden = true;
+            addHalfExtraTime(v);
+          });
+          acts.appendChild(ok);
+        });
+      });
+
+      document.getElementById('btn-clear-added').addEventListener('click', () => {
+        if (!state.addedTime) return;
+        state.clockSec = Math.max(0, state.clockSec - state.addedTime);
+        state.addedTime = 0;
+        saveState(); renderClockAndTimers();
+        toast('Added time cleared');
+      });
+
       document.getElementById('sel-period').addEventListener('change', e => {
         if (isPeriodSwitchLocked()) {
           e.target.value = state.period;
           toast('Cannot switch period until the timer reaches 00:00');
           return;
         }
-        state.period = e.target.value;
+        const target = e.target.value;
+        if (!canEnterPeriod(target)) {
+          e.target.value = state.period;
+          if (target === 'Penalties') {
+            toast('Penalty shootout is only available after both Extra Time halves end in a draw');
+          } else {
+            toast('Extra Time is only available when the match is tied (draw)');
+          }
+          return;
+        }
+        state.period = target;
         state.clockRunning = false;
+        state.addedTime = 0;
         if (state.period === 'Half-Time') {
           state.status = 'halftime';
           state.htAt = Date.now();
@@ -2953,6 +3158,7 @@
           return;
         }
         state.clockRunning = false;
+        state.addedTime = 0;
         if (state.period === '1st Half') {
           state.period = 'Half-Time';
           state.status = 'halftime';
@@ -2960,7 +3166,7 @@
           state.clockSec = state.breakMinutes * 60;
           addEvent('home', 'info', 'Half-Time', `${state.teams.home.score} – ${state.teams.away.score}`);
           playBuzzer(700, 400);
-          toast('Half-Time break');
+          toast(`Half-Time break (${state.breakMinutes}m)`);
         } else if (state.period === 'Half-Time') {
           state.period = '2nd Half';
           state.status = 'live';
@@ -2971,20 +3177,31 @@
           addEvent('home', 'info', '2nd Half started', 'Accumulated fouls reset to 0');
           toast('2nd Half · Fouls reset to 0');
         } else if (state.period === '2nd Half') {
+          if (!isDraw()) {
+            completeMatch();
+            return;
+          }
           state.period = 'Extra Time 1';
           state.clockSec = 5 * 60;
-          toast('Extra Time 1 (5:00) · 2nd-half fouls carry over, no time-outs');
+          addEvent('home', 'info', 'Extra Time 1 started', `Match tied ${state.teams.home.score} – ${state.teams.away.score}`);
+          toast('Draw! Extra Time 1 (5:00) · 2nd-half fouls carry over');
         } else if (state.period === 'Extra Time 1') {
           state.period = 'Extra Time 2';
           state.clockSec = 5 * 60;
+          addEvent('home', 'info', 'Extra Time 2 started', `${state.teams.home.score} – ${state.teams.away.score}`);
           toast('Extra Time 2 (5:00) · Fouls carry over, no time-outs');
         } else if (state.period === 'Extra Time 2') {
+          state.et2Done = true;
+          if (!isDraw()) {
+            completeMatch();
+            return;
+          }
           state.period = 'Penalties';
-          toast('Penalty Shootout mode (no time limit)');
+          addEvent('home', 'info', 'Penalty Shootout started', `Still tied ${state.teams.home.score} – ${state.teams.away.score} after Extra Time`);
+          toast('Still a draw after Extra Time — Penalty Shootout!');
         } else {
-          state.status = 'done';
-          addEvent('home', 'info', 'Full time', `${state.teams.home.score} – ${state.teams.away.score}`);
-          toast('Match finished');
+          completeMatch();
+          return;
         }
         saveState(); render();
       });
@@ -2999,6 +3216,7 @@
       document.getElementById('inp-break-mins').addEventListener('change', e => {
         const v = Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 5));
         state.breakMinutes = v;
+        state.breakCustom = true;
         if (!state.clockRunning && state.period === 'Half-Time') state.clockSec = v * 60;
         saveState(); render();
       });
@@ -3216,9 +3434,9 @@
         } else { delete m.htEnd; delete m.htLeft; }
         // Match clock for the site: follows this panel, including pauses
         if (isLiveOrDone && state.status !== 'done' && state.period !== 'Half-Time' && state.period !== 'Penalties') {
-          const len = (state.period.startsWith('Extra') ? 5 : state.halfMinutes) * 60;
+          const len = (state.period.startsWith('Extra') ? 5 : state.halfMinutes) * 60 + (state.addedTime || 0);
           const elp = Math.max(0, len - state.clockSec);
-          m.rc = { p: state.period, hm: state.halfMinutes, run: !!state.clockRunning, at: state.clockRunning ? Date.now() - elp * 1000 : null, sec: state.clockRunning ? null : elp };
+          m.rc = { p: state.period, hm: state.halfMinutes, add: Math.ceil((state.addedTime || 0) / 60), run: !!state.clockRunning, at: state.clockRunning ? Date.now() - elp * 1000 : null, sec: state.clockRunning ? null : elp };
         } else delete m.rc;
         if (state.h2At) m.h2At = state.h2At;
 
@@ -3226,10 +3444,11 @@
         m.fouls = { h: state.teams.home.fouls, a: state.teams.away.fouls };
         m.timeouts = { h: state.teams.home.timeouts.filter(Boolean).length, a: state.teams.away.timeouts.filter(Boolean).length };
 
-        // Full-time result -> updates main app Standings / Points Table, Top Scorers & Cards
+        // Full-time / completed result -> marks match completed in main app & updates Standings, Top Scorers & Cards
         if (state.status === 'done') {
           m.hs = state.teams.home.score;
           m.as = state.teams.away.score;
+          m.completed = true;
           m.goals = goalsArr.map(g => {
             const o = { team: g.team, player: g.player };
             if (g.assist) o.assist = g.assist;
@@ -3245,9 +3464,10 @@
             if (so.hScore !== so.aScore) m.pens = so.hScore > so.aScore ? homeId : awayId;
           }
         } else {
-          // If reopened or live, keep hs/as null so main app shows Live instead of Full Time
+          // If reopened or live, keep hs/as null so main app shows Live instead of Completed
           m.hs = null;
           m.as = null;
+          delete m.completed;
           if (isLiveOrDone && (!copy.status || copy.status === 'upcoming')) copy.status = 'live';
         }
 
@@ -3376,7 +3596,8 @@
 
         const fresh = defaultState();
         fresh.halfMinutes = state.halfMinutes || 20;
-        fresh.breakMinutes = state.breakMinutes || 5;
+        fresh.breakMinutes = state.breakCustom ? (state.breakMinutes || 5) : 5;
+        fresh.breakCustom = !!state.breakCustom;
         fresh.clockSec = fresh.halfMinutes * 60;
         fresh.status = isPlayed ? 'done' : m.started ? (m.half === 'ht' ? 'halftime' : 'live') : 'upcoming';
         fresh.period = m.half === 'ht' ? 'Half-Time' : m.half === '2' ? '2nd Half' : '1st Half';
