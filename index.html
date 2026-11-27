@@ -1413,6 +1413,7 @@
           <svg class="i"><use href="#ic-sound"/></svg>
         </button>
         <button class="btn btn-sm" type="button" id="btn-match-state">Start match</button>
+        <button class="btn btn-sm" type="button" id="btn-next-match" hidden>Next match →</button>
         <button class="btn btn-danger btn-sm" type="button" id="btn-reset-match">Reset</button>
         <button class="btn btn-ghost btn-sm" type="button" id="btn-report-top">
           <svg class="i"><use href="#ic-print"/></svg>PDF
@@ -2643,6 +2644,12 @@
           matchBtn.className = 'btn btn-live btn-sm';
         }
 
+        // After full time, offer the next match of the same tournament
+        const nextBtn = document.getElementById('btn-next-match');
+        const nx = state.status === 'done' ? findNextMatch() : null;
+        nextBtn.hidden = !nx;
+        if (nx) nextBtn.title = `Match ${nx.no}: ${nx.label}`;
+
         document.getElementById('sel-period').value = state.period;
         document.getElementById('inp-half-mins').value = state.halfMinutes;
         document.getElementById('inp-break-mins').value = state.breakMinutes;
@@ -2682,6 +2689,25 @@
           toast('Match marked Full Time — standings updated!');
         }
         saveState(); render();
+      });
+
+      // Next unplayed match (both teams set) after this one, in match order
+      function findNextMatch() {
+        let tl = null; try { tl = cloud.tournaments; } catch (e) {}
+        if (!state.linked || !tl) return null;
+        const t = tl.find(x => x.id === state.linked.tournamentId);
+        if (!t) return null;
+        const list = t.matches || [];
+        const cur = list.findIndex(x => x.id === state.linked.matchId);
+        const order = list.slice(cur + 1).concat(list.slice(0, Math.max(0, cur)));
+        const sq = id => (t.squads || []).find(x => x.id === id);
+        const m = order.find(x => x.id !== state.linked.matchId && x.home && x.away && sq(x.home) && sq(x.away) && x.hs == null);
+        return m ? { t, m, no: list.indexOf(m) + 1, label: `${sq(m.home).name} vs ${sq(m.away).name}` } : null;
+      }
+      document.getElementById('btn-next-match').addEventListener('click', () => {
+        const nx = findNextMatch();
+        if (!nx) { toast('No more matches to play in this tournament.'); render(); return; }
+        loadMatchFromTournament(nx.t, nx.m);
       });
 
       document.getElementById('btn-clock-toggle').addEventListener('click', () => {
@@ -3123,6 +3149,12 @@
 
         state = fresh;
         saveState(true);
+        // Keep the address on this match, so a refresh doesn't jump back to the old one
+        try {
+          const u = new URL(location.href);
+          u.searchParams.set('t', t.id); u.searchParams.set('m', m.id);
+          history.replaceState(null, '', u.pathname + u.search + u.hash);
+        } catch (e) {}
         render();
         updateSyncPill();
         connectModal.hidden = true;
@@ -3385,6 +3417,7 @@
             cloud.db.collection('tournaments').onSnapshot(snap => {
               cloud.tournaments = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
               cloud.tournaments.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+              if (state.status === 'done') render();
 
               // Support deep-link ?t=<tournamentId>&m=<matchId>
               const qs = new URLSearchParams(location.search);
