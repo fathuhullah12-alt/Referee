@@ -1361,7 +1361,67 @@
       #report-modal .sheet-body { padding: 0 !important; overflow: visible !important; }
       .rep-sigs { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 34px; }
       .rep-sigs div { border-top: 1px solid #444; padding-top: 6px; font-size: 12px; color: #444; }
+      .rep-sec { break-inside: avoid; page-break-inside: avoid; }
     }
+    .off-subhead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 12px 0 6px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line-soft);
+      font: 700 10.5px/1.2 var(--font-body);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+    }
+    .off-role {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: color-mix(in srgb, var(--teal) 14%, var(--field));
+      color: var(--teal);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-right: 4px;
+    }
+    .ev-group-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 8px;
+      margin-top: 6px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--teal) 10%, var(--field));
+      border: 1px solid var(--line-soft);
+      font: 800 11px/1.2 var(--font-body);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+    }
+    .ev-group-head:first-child { margin-top: 0; }
+    .ev-group-head small { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--fg-dim); }
+    .rep-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+    .rep-table th, .rep-table td { padding: 6px 8px; border-bottom: 1px solid var(--line-soft); text-align: center; }
+    .rep-table th:first-child, .rep-table td:first-child { text-align: left; font-weight: 700; }
+    .rep-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-dim); }
+    .lock-banner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--teal) 12%, var(--field));
+      border: 1px solid color-mix(in srgb, var(--teal) 35%, var(--line));
+      color: var(--fg-muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .lock-banner[hidden] { display: none; }
     /* Sign-in lock: only admins and managers get past it */
     .gate { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 20px; background: var(--bg); overflow-y: auto; }
     .gate[hidden] { display: none; }
@@ -1762,7 +1822,8 @@
               score: 0,
               fouls: 0,
               timeouts: [false, false],
-              players: []
+              players: [],
+              officials: []
             },
             away: {
               name: 'United Futsal',
@@ -1770,7 +1831,8 @@
               score: 0,
               fouls: 0,
               timeouts: [false, false],
-              players: []
+              players: [],
+              officials: []
             }
           },
           suspensions: [],
@@ -2067,55 +2129,102 @@
         );
       }
 
-      // Cards
-      function recordCard(teamKey, cardType, playerName = '') {
+      function isSuperAdmin() {
+        return !!(typeof cloud !== 'undefined' && cloud.member && cloud.member.role === 'admin');
+      }
+
+      function isMatchLocked() {
+        return state.status === 'done';
+      }
+
+      function guardEdit() {
+        if (!isMatchLocked()) return false;
+        toast(isSuperAdmin() ? 'Match is completed — click Reopen to make changes.' : 'Match is completed — read-only (Admin only can edit).');
+        return true;
+      }
+
+      // Cards (Players & Team Officials)
+      function recordCard(teamKey, cardType, personName = '', isOfficial = false, officialRole = '') {
+        if (guardEdit()) return;
         const team = state.teams[teamKey];
-        const p = playerName ? team.players.find(x => x.name === playerName) : null;
+        const officials = team.officials || [];
+        const off = isOfficial
+          ? officials.find(x => x.name === personName)
+          : (!personName ? null : (!team.players.find(x => x.name === personName) ? officials.find(x => x.name === personName) : null));
+        const p = !off && personName ? team.players.find(x => x.name === personName) : null;
+        const treatAsOfficial = isOfficial || !!off;
+        const roleTag = officialRole || (off && off.role) || 'Official';
+        const displayWho = treatAsOfficial ? `${personName || team.name} (${roleTag})` : (personName || team.name);
 
         if (cardType === 'yellow') {
-          if (p) p.yellow = (p.yellow || 0) + 1;
-          addEvent(teamKey, 'yellow', 'Yellow card', playerName ? `${playerName} (${team.name})` : team.name, playerName);
-          if (p && p.yellow >= 2 && !p.red) {
+          if (off) off.yellow = (off.yellow || 0) + 1;
+          else if (p) p.yellow = (p.yellow || 0) + 1;
+          addEvent(teamKey, 'yellow', treatAsOfficial ? 'Yellow card (Official)' : 'Yellow card', `${displayWho} · ${team.name}`, personName);
+          if (off && off.yellow >= 2 && !off.red) {
+            off.red = 1;
+            addEvent(teamKey, 'red', '2nd Yellow → Red card (Official)', `${displayWho} sent off from technical area`, personName);
+            toast(`2nd Yellow = Red card for ${displayWho}! Sent off from bench.`);
+          } else if (p && p.yellow >= 2 && !p.red) {
             p.red = 1;
-            addEvent(teamKey, 'red', '2nd Yellow → Red card', `${playerName} sent off · 2:00 suspension`, playerName);
-            startSuspension(teamKey, playerName, 120);
-            toast(`2nd Yellow = Red card for ${playerName}! 2:00 suspension started.`);
+            addEvent(teamKey, 'red', '2nd Yellow → Red card', `${personName} sent off · 2:00 suspension`, personName);
+            startSuspension(teamKey, personName, 120);
+            toast(`2nd Yellow = Red card for ${personName}! 2:00 suspension started.`);
           } else {
-            toast(`Yellow card · ${playerName || team.name}`);
+            toast(`Yellow card · ${displayWho}`);
           }
         } else if (cardType === 'red') {
-          if (p) p.red = (p.red || 0) + 1;
-          addEvent(teamKey, 'red', 'Red card', `${playerName || team.name} · 2:00 suspension`, playerName);
-          startSuspension(teamKey, playerName || `${team.name} player`, 120);
-          toast(`Red card · ${playerName || team.name} (2:00 timer started)`);
+          if (off) off.red = (off.red || 0) + 1;
+          else if (p) p.red = (p.red || 0) + 1;
+          if (treatAsOfficial) {
+            addEvent(teamKey, 'red', 'Red card (Official)', `${displayWho} sent off from technical area · ${team.name}`, personName);
+            toast(`Red card · ${displayWho} (sent off from bench)`);
+          } else {
+            addEvent(teamKey, 'red', 'Red card', `${personName || team.name} · 2:00 suspension`, personName);
+            startSuspension(teamKey, personName || `${team.name} player`, 120);
+            toast(`Red card · ${personName || team.name} (2:00 timer started)`);
+          }
         }
         saveState(); render();
       }
 
       function promptCard(teamKey, cardType) {
+        if (guardEdit()) return;
         const team = state.teams[teamKey];
-        const title = cardType === 'red' ? 'Red Card (2:00 Suspension)' : 'Yellow Card';
+        const title = cardType === 'red' ? 'Red Card' : 'Yellow Card';
         const playerBtns = team.players.filter(p => !p.red).map(p =>
           `<button class="pick-btn" type="button" data-pick="${esc(p.name)}">
             <span class="p-num">${esc(p.num || '–')}</span><span>${esc(p.name)}</span>
           </button>`
         ).join('');
+        const offList = (team.officials || []).filter(o => !o.red);
+        const offBtns = offList.map(o =>
+          `<button class="pick-btn" type="button" data-pick-off="${esc(o.name)}" data-pick-role="${esc(o.role || 'Official')}">
+            <span class="off-role">${esc(o.role || 'Official')}</span><span>${esc(o.name)}</span>
+          </button>`
+        ).join('');
 
         openModal(
           `${title} · ${team.name}`,
-          `${team.players.length ? `<div class="pick-grid">${playerBtns}</div>` : ''}
-           <input class="input" id="am-custom-p" type="text" placeholder="Or type player name / # (optional)">`,
+          `${playerBtns ? `<div class="kicker" style="margin-bottom:4px;">Players</div><div class="pick-grid">${playerBtns}</div>` : ''}
+           ${offBtns ? `<div class="kicker" style="margin:8px 0 4px;">Team Officials</div><div class="pick-grid">${offBtns}</div>` : ''}
+           <input class="input" id="am-custom-p" type="text" placeholder="Or type player / official name (optional)">`,
           (body, acts) => {
             body.querySelectorAll('[data-pick]').forEach(b => {
               b.addEventListener('click', () => {
                 actionModal.hidden = true;
-                recordCard(teamKey, cardType, b.dataset.pick);
+                recordCard(teamKey, cardType, b.dataset.pick, false);
+              });
+            });
+            body.querySelectorAll('[data-pick-off]').forEach(b => {
+              b.addEventListener('click', () => {
+                actionModal.hidden = true;
+                recordCard(teamKey, cardType, b.dataset.pickOff, true, b.dataset.pickRole);
               });
             });
             acts.querySelector('#am-confirm').addEventListener('click', () => {
               const val = body.querySelector('#am-custom-p').value.trim();
               actionModal.hidden = true;
-              recordCard(teamKey, cardType, val);
+              recordCard(teamKey, cardType, val, false);
             });
           },
           `<button class="btn btn-sm" type="button" id="am-confirm">Confirm</button>`
@@ -2443,11 +2552,13 @@
         });
       }
 
-      // Match Report Builder
+      // Match Report Builder (Full Match: All Halves + Half-by-Half Summary + Full Timeline)
+      const PERIOD_ORDER = ['1st Half', 'Half-Time', '2nd Half', 'Extra Time 1', 'Extra Time 2', 'Penalties'];
+
       function buildReportData() {
         const h = state.teams.home;
         const a = state.teams.away;
-        const statusLabels = { upcoming: 'UPCOMING', live: 'LIVE', halftime: 'HALF-TIME', done: 'FULL TIME' };
+        const statusLabels = { upcoming: 'UPCOMING', live: 'LIVE', halftime: 'HALF-TIME', done: 'COMPLETED' };
         const now = new Date();
         const created = `${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}/${now.getFullYear()}, ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
 
@@ -2459,10 +2570,42 @@
         const fouls = evChron.filter(e => e.type === 'foul');
         const so = shootoutStats();
 
+        const halfStats = ['1st Half', '2nd Half', 'Extra Time 1', 'Extra Time 2'].filter(p =>
+          p === '1st Half' || p === '2nd Half' || evChron.some(e => e.period === p) || state.period === p
+        ).map(p => {
+          const pe = evChron.filter(e => e.period === p);
+          return {
+            period: p,
+            hg: pe.filter(e => e.type === 'goal' && e.team === 'home').length,
+            ag: pe.filter(e => e.type === 'goal' && e.team === 'away').length,
+            hf: pe.filter(e => e.type === 'foul' && e.team === 'home').length,
+            af: pe.filter(e => e.type === 'foul' && e.team === 'away').length,
+            hc: pe.filter(e => (e.type === 'yellow' || e.type === 'red') && e.team === 'home').length,
+            ac: pe.filter(e => (e.type === 'yellow' || e.type === 'red') && e.team === 'away').length,
+            hto: pe.filter(e => e.type === 'timeout' && e.team === 'home').length,
+            ato: pe.filter(e => e.type === 'timeout' && e.team === 'away').length
+          };
+        });
+
+        const timelineGroups = [];
+        PERIOD_ORDER.forEach(p => {
+          const items = evChron.filter(e => e.period === p);
+          if (items.length) timelineGroups.push({ period: p, items });
+        });
+        const otherEv = evChron.filter(e => !PERIOD_ORDER.includes(e.period));
+        if (otherEv.length) timelineGroups.push({ period: 'Other', items: otherEv });
+
+        const htRow = halfStats.find(x => x.period === '1st Half');
+        const htScore = htRow ? `${htRow.hg} – ${htRow.ag}` : '0 – 0';
+
         return {
           h, a,
           statusText: statusLabels[state.status] || 'UPCOMING',
           created,
+          htScore,
+          halfStats,
+          timelineGroups,
+          evChron,
           homeGoals, awayGoals, timeouts, cards, fouls, so,
           hToCount: h.timeouts.filter(Boolean).length,
           aToCount: a.timeouts.filter(Boolean).length
@@ -2478,16 +2621,18 @@
       function buildPlainReportText() {
         const r = buildReportData();
         const lines = [
-          'Mubaaraiy Manager',
-          'Futsal',
-          `${r.h.name} vs ${r.a.name} – MATCH REPORT`,
+          'Mubaaraiy Manager — FULL MATCH REPORT',
+          state.linked ? `${state.linked.tournamentName} · Match #${state.linked.matchNo}${state.linked.stage ? ' · ' + state.linked.stage : ''}` : 'Futsal',
+          `${r.h.name} vs ${r.a.name}`,
           '',
-          `${r.h.name} ${r.h.score} – ${r.a.score} ${r.a.name}`,
+          `Final Score: ${r.h.name} ${r.h.score} – ${r.a.score} ${r.a.name}`,
+          `Half-Time: ${r.htScore}`,
           state.shootout.kicks.length ? `Penalties: ${r.h.name} ${r.so.hScore} – ${r.so.aScore} ${r.a.name}` : null,
           `Status: ${r.statusText}`,
-          `Period: ${state.period}`,
-          `Clock: ${state.period === 'Penalties' ? 'No time limit (Penalties)' : fmtClock(state.clockSec)}`,
           `Report created: ${r.created}`,
+          '',
+          'HALF-BY-HALF SUMMARY',
+          ...r.halfStats.map(s => `• ${s.period}: Goals ${s.hg}–${s.ag} | Fouls ${s.hf}–${s.af} | Cards ${s.hc}–${s.ac} | Timeouts ${s.hto}–${s.ato}`),
           '',
           `${r.h.name} goals`,
           r.homeGoals.length
@@ -2505,15 +2650,20 @@
             ? r.timeouts.map(t => `• ${t.clock} (${t.period}) – ${state.teams[t.team].name} (${t.label})`).join('\n')
             : 'No timeout times recorded.',
           '',
-          'Cards & suspensions',
+          'Cards & suspensions (Players & Officials)',
           r.cards.length
             ? r.cards.map(c => `• ${c.clock} (${c.period}) – ${c.label}: ${c.detail}`).join('\n')
             : 'No cards or suspensions recorded.',
           '',
-          'Accumulated fouls',
+          'Accumulated fouls (All Halves)',
           r.fouls.length
-            ? `${r.h.name}: ${r.h.fouls} – ${r.a.name}: ${r.a.fouls}\n` + r.fouls.map(f => `• ${f.clock} (${f.period}) – ${f.detail}`).join('\n')
-            : 'No accumulated fouls recorded.'
+            ? r.fouls.map(f => `• ${f.clock} (${f.period}) – ${f.detail}`).join('\n')
+            : 'No accumulated fouls recorded.',
+          '',
+          'FULL HALF-WISE TIMELINE',
+          ...(r.timelineGroups.length
+            ? r.timelineGroups.flatMap(g => [`[${g.period}]`, ...g.items.map(e => `  ${e.clock} · ${e.label}${e.detail ? ' — ' + e.detail : ''}`)])
+            : ['No events recorded.'])
         ].filter(x => x !== null);
         return lines.join('\n');
       }
@@ -2523,30 +2673,78 @@
         const listOrEmpty = (items, emptyText, renderItem) =>
           items.length ? `<ul class="rep-ul">${items.map(renderItem).join('')}</ul>` : `<p>${esc(emptyText)}</p>`;
 
+        const halfRowsHtml = r.halfStats.map(s => `
+          <tr>
+            <td>${esc(s.period)}</td>
+            <td><b>${s.hg} – ${s.ag}</b></td>
+            <td>${s.hf} – ${s.af}</td>
+            <td>${s.hc} – ${s.ac}</td>
+            <td>${s.hto} – ${s.ato}</td>
+          </tr>
+        `).join('');
+
+        const timelineHtml = r.timelineGroups.length
+          ? r.timelineGroups.map(g => `
+              <div style="margin-top:8px;">
+                <div style="font:800 11px var(--font-body);text-transform:uppercase;letter-spacing:.07em;color:var(--fg-muted);margin-bottom:4px;">${esc(g.period)}</div>
+                <ul class="rep-ul">
+                  ${g.items.map(ev => {
+                    const ic = ev.type === 'goal' ? '⚽' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'foul' ? '⚠️' : ev.type === 'timeout' ? '⏱️' : '•';
+                    return `<li><span>${ic} <b>${esc(ev.label)}</b>${ev.detail ? ' · ' + esc(ev.detail) : ''}</span><small>${esc(ev.clock)}</small></li>`;
+                  }).join('')}
+                </ul>
+              </div>
+            `).join('')
+          : '<p>No timeline events recorded.</p>';
+
+        const shootoutHtml = state.shootout.kicks.length ? `
+          <div class="rep-sec">
+            <h4>Penalty Shootout (${r.so.hScore} – ${r.so.aScore})</h4>
+            <ul class="rep-ul">
+              ${state.shootout.kicks.map((k, i) => `
+                <li>
+                  <span>${k.scored ? '✅ Goal' : '❌ Miss'} · ${esc(state.teams[k.team].name)}${k.player ? ' — ' + esc(k.player) : ''}</span>
+                  <small>Kick #${i + 1}</small>
+                </li>
+              `).join('')}
+            </ul>
+          </div>` : '';
+
         document.getElementById('report-body').innerHTML = `
           <div class="report-doc">
             <div class="rep-top">
               <div class="rep-brand">
                 <strong>Mubaaraiy Manager</strong>
-                <span class="tag t-green">Futsal</span>
+                <span class="tag t-green">${state.linked ? esc(state.linked.tournamentName) : 'Futsal'}</span>
               </div>
-              <h2 class="rep-title">${esc(r.h.name)} vs ${esc(r.a.name)} – MATCH REPORT</h2>
+              <h2 class="rep-title">${esc(r.h.name)} vs ${esc(r.a.name)} – FULL MATCH REPORT</h2>
             </div>
 
             <div class="rep-score-banner">
               <b>${esc(r.h.name)}</b>
               <div>
                 <span class="rep-score">${r.h.score} – ${r.a.score}</span>
-                ${state.shootout.kicks.length ? `<div style="margin-top:6px;font-size:13px;font-weight:700;color:var(--amber-fg);">Penalties: ${r.so.hScore} – ${r.so.aScore}</div>` : ''}
+                <div style="margin-top:4px;font-size:12px;color:var(--fg-muted);">Half-Time: ${esc(r.htScore)}</div>
+                ${state.shootout.kicks.length ? `<div style="margin-top:4px;font-size:13px;font-weight:700;color:var(--amber-fg);">Penalties: ${r.so.hScore} – ${r.so.aScore}</div>` : ''}
               </div>
               <b>${esc(r.a.name)}</b>
             </div>
 
             <div class="rep-meta">
               <div>Status: <b>${esc(r.statusText)}</b></div>
-              <div>Period: <b>${esc(state.period)}</b></div>
-              <div>Clock: <b>${state.period === 'Penalties' ? 'No time limit' : fmtClock(state.clockSec)}</b></div>
+              ${state.linked ? `<div>Match: <b>#${state.linked.matchNo}${state.linked.stage ? ' · ' + esc(state.linked.stage) : ''}</b></div>` : `<div>Period: <b>${esc(state.period)}</b></div>`}
+              <div>Total Fouls: <b>${r.fouls.filter(f => f.team === 'home').length} – ${r.fouls.filter(f => f.team === 'away').length}</b></div>
               <div>Report created: <b>${esc(r.created)}</b></div>
+            </div>
+
+            <div class="rep-sec">
+              <h4>Half-by-Half Summary (${esc(r.h.name)} vs ${esc(r.a.name)})</h4>
+              <table class="rep-table">
+                <thead>
+                  <tr><th>Period</th><th>Goals</th><th>Fouls</th><th>Cards</th><th>Timeouts</th></tr>
+                </thead>
+                <tbody>${halfRowsHtml}</tbody>
+              </table>
             </div>
 
             <div class="rep-sec">
@@ -2563,6 +2761,8 @@
               )}
             </div>
 
+            ${shootoutHtml}
+
             <div class="rep-sec">
               <h4>Timeouts</h4>
               <p><b>${esc(r.h.name)}: ${r.hToCount}/2 – ${esc(r.a.name)}: ${r.aToCount}/2</b></p>
@@ -2572,18 +2772,22 @@
             </div>
 
             <div class="rep-sec">
-              <h4>Cards &amp; suspensions</h4>
+              <h4>Cards &amp; suspensions (Players &amp; Officials)</h4>
               ${listOrEmpty(r.cards, 'No cards or suspensions recorded.', c =>
                 `<li><span>${c.type === 'red' ? '🟥' : '🟨'} ${esc(c.label)} · ${esc(c.detail)}</span><small>${esc(c.period)} · ${esc(c.clock)}</small></li>`
               )}
             </div>
 
             <div class="rep-sec">
-              <h4>Accumulated fouls</h4>
-              ${r.fouls.length ? `<p><b>${esc(r.h.name)}: ${r.h.fouls} – ${esc(r.a.name)}: ${r.a.fouls}</b></p>` : ''}
+              <h4>Accumulated fouls (All Halves)</h4>
               ${listOrEmpty(r.fouls, 'No accumulated fouls recorded.', f =>
                 `<li><span>⚠️ ${esc(f.detail)}</span><small>${esc(f.period)} · ${esc(f.clock)}</small></li>`
               )}
+            </div>
+
+            <div class="rep-sec">
+              <h4>Full Half-Wise Match Timeline</h4>
+              ${timelineHtml}
             </div>
 
             <div class="rep-sigs">
@@ -2615,10 +2819,11 @@
       // Render Team Panel (Inline editable team name & color!)
       function renderTeamPanel(container, teamKey, roleLabel) {
         const t = state.teams[teamKey];
-        const toAllowed = state.period === '1st Half' || state.period === '2nd Half';
+        const locked = isMatchLocked();
+        const toAllowed = !locked && (state.period === '1st Half' || state.period === '2nd Half');
         const idx = state.period === '2nd Half' ? 1 : 0;
         const halfLbl = idx === 0 ? '1H' : '2H';
-        const toUsed = toAllowed && t.timeouts[idx];
+        const toUsed = (state.period === '1st Half' || state.period === '2nd Half') && t.timeouts[idx];
         const activeSuspCount = state.suspensions.filter(s => s.team === teamKey).length;
         const onCourt = Math.max(3, 5 - activeSuspCount);
 
@@ -2630,16 +2835,16 @@
         container.style.setProperty('--tc', t.color || '#3d8a89');
         container.innerHTML = `
           <div class="tp-head">
-            <input class="color-dot" type="color" value="${esc(t.color)}" data-tcolor aria-label="${roleLabel} team color">
-            <input class="tp-name-input" type="text" maxlength="36" value="${esc(t.name)}" data-tname aria-label="${roleLabel} team name">
+            <input class="color-dot" type="color" value="${esc(t.color)}" data-tcolor aria-label="${roleLabel} team color" ${locked ? 'disabled' : ''}>
+            <input class="tp-name-input" type="text" maxlength="36" value="${esc(t.name)}" data-tname aria-label="${roleLabel} team name" ${locked ? 'disabled' : ''}>
             ${activeSuspCount ? `<span class="tag t-rose" title="Playing short-handed due to red card">${onCourt} on court</span>` : ''}
             <span class="side-badge">${roleLabel}</span>
           </div>
 
           <div class="score-box">
-            <button class="score-btn" type="button" data-score="-1" aria-label="Decrease score">−</button>
+            <button class="score-btn" type="button" data-score="-1" aria-label="Decrease score" ${locked ? 'disabled' : ''}>−</button>
             <div class="score-num">${t.score}</div>
-            <button class="score-btn plus" type="button" data-score="1" aria-label="Increase score">+</button>
+            <button class="score-btn plus" type="button" data-score="1" aria-label="Increase score" ${locked ? 'disabled' : ''}>+</button>
           </div>
 
           <div class="fouls-box ${foulClass}">
@@ -2651,40 +2856,52 @@
               </div>
             </div>
             <div style="display:flex;gap:4px;">
-              <button class="btn btn-ghost btn-xs" type="button" data-foul="-1" ${t.fouls === 0 ? 'disabled' : ''}>−</button>
-              <button class="btn btn-amber btn-xs" type="button" data-foul="1">+ Foul</button>
+              <button class="btn btn-ghost btn-xs" type="button" data-foul="-1" ${locked || t.fouls === 0 ? 'disabled' : ''}>−</button>
+              <button class="btn btn-amber btn-xs" type="button" data-foul="1" ${locked ? 'disabled' : ''}>+ Foul</button>
             </div>
           </div>
 
           <div class="action-grid">
-            <button class="act-btn ${toUsed ? 'to-used' : ''}" type="button" data-to="1" ${!toAllowed ? 'disabled title="No time-outs in Extra Time (FIFA rule)"' : ''}>${toAllowed ? `TO · ${halfLbl}${toUsed ? ' ✓' : ''}` : 'No TO'}</button>
-            <button class="act-btn" type="button" data-pen="1">Penalty</button>
-            <button class="act-btn" type="button" data-act="yellow"><i class="bk bk-y"></i>Yellow</button>
-            <button class="act-btn" type="button" data-act="red"><i class="bk bk-r"></i>Red</button>
+            <button class="act-btn ${toUsed ? 'to-used' : ''}" type="button" data-to="1" ${!toAllowed ? 'disabled title="Time-outs unavailable"' : ''}>${(state.period === '1st Half' || state.period === '2nd Half') ? `TO · ${halfLbl}${toUsed ? ' ✓' : ''}` : 'No TO'}</button>
+            <button class="act-btn" type="button" data-pen="1" ${locked ? 'disabled' : ''}>Penalty</button>
+            <button class="act-btn" type="button" data-act="yellow" ${locked ? 'disabled' : ''}><i class="bk bk-y"></i>Yellow</button>
+            <button class="act-btn" type="button" data-act="red" ${locked ? 'disabled' : ''}><i class="bk bk-r"></i>Red</button>
           </div>
         `;
 
         container.querySelector('[data-tname]').addEventListener('change', e => {
+          if (guardEdit()) { e.target.value = t.name; return; }
           t.name = e.target.value.trim() || (teamKey === 'home' ? 'City Futsal' : 'United Futsal');
           saveState(); render();
         });
         container.querySelector('[data-tcolor]').addEventListener('input', e => {
+          if (guardEdit()) { e.target.value = t.color; return; }
           t.color = e.target.value;
           container.style.setProperty('--tc', t.color);
           saveState();
         });
         container.querySelectorAll('[data-score]').forEach(b => {
           b.addEventListener('click', () => {
+            if (guardEdit()) return;
             const d = Number(b.dataset.score);
             if (d > 0) promptGoal(teamKey);
             else recordGoal(teamKey, -1);
           });
         });
         container.querySelectorAll('[data-foul]').forEach(b => {
-          b.addEventListener('click', () => adjustFoul(teamKey, Number(b.dataset.foul)));
+          b.addEventListener('click', () => {
+            if (guardEdit()) return;
+            adjustFoul(teamKey, Number(b.dataset.foul));
+          });
         });
-        container.querySelector('[data-to]').addEventListener('click', () => triggerTimeout(teamKey));
-        container.querySelector('[data-pen]').addEventListener('click', () => promptPenalty(teamKey));
+        container.querySelector('[data-to]').addEventListener('click', () => {
+          if (guardEdit()) return;
+          triggerTimeout(teamKey);
+        });
+        container.querySelector('[data-pen]').addEventListener('click', () => {
+          if (guardEdit()) return;
+          promptPenalty(teamKey);
+        });
         container.querySelectorAll('[data-act]').forEach(b => {
           b.addEventListener('click', () => promptCard(teamKey, b.dataset.act));
         });
@@ -2692,6 +2909,8 @@
 
       function renderRoster(container, teamKey) {
         const t = state.teams[teamKey];
+        const locked = isMatchLocked();
+        const officials = t.officials || [];
         const rows = t.players.map(p => {
           const badges = [];
           if (p.goals) badges.push(`⚽${p.goals}`);
@@ -2707,10 +2926,28 @@
                 ${badges.length ? `<span class="p-badges">${badges.join(' ')}</span>` : ''}
               </span>
               <span class="p-acts">
-                <button class="p-act" type="button" data-pg="${esc(p.id)}" title="${p.red ? 'Sent off — cannot return' : 'Goal (choose assist)'}" ${p.red ? 'disabled' : ''}>⚽</button>
-                <button class="p-act" type="button" data-py="${esc(p.id)}" title="${p.red ? 'Sent off' : 'Yellow card'}" ${p.red ? 'disabled' : ''}><i class="bk bk-y" style="width:7px;height:10px;"></i></button>
-                <button class="p-act" type="button" data-pr="${esc(p.id)}" title="${p.red ? 'Already sent off' : 'Red card (2:00)'}" ${p.red ? 'disabled' : ''}><i class="bk bk-r" style="width:7px;height:10px;"></i></button>
-                ${(state.linked || p.fromMain) ? '' : `<button class="p-act" type="button" data-px="${esc(p.id)}" title="Remove player" style="color:var(--fg-dim);">×</button>`}
+                <button class="p-act" type="button" data-pg="${esc(p.id)}" title="${locked ? 'Match completed' : p.red ? 'Sent off — cannot return' : 'Goal (choose assist)'}" ${locked || p.red ? 'disabled' : ''}>⚽</button>
+                <button class="p-act" type="button" data-py="${esc(p.id)}" title="${locked ? 'Match completed' : p.red ? 'Sent off' : 'Yellow card'}" ${locked || p.red ? 'disabled' : ''}><i class="bk bk-y" style="width:7px;height:10px;"></i></button>
+                <button class="p-act" type="button" data-pr="${esc(p.id)}" title="${locked ? 'Match completed' : p.red ? 'Already sent off' : 'Red card (2:00)'}" ${locked || p.red ? 'disabled' : ''}><i class="bk bk-r" style="width:7px;height:10px;"></i></button>
+                ${(locked || state.linked || p.fromMain) ? '' : `<button class="p-act" type="button" data-px="${esc(p.id)}" title="Remove player" style="color:var(--fg-dim);">×</button>`}
+              </span>
+            </li>
+          `;
+        }).join('');
+
+        const offRows = officials.map(o => {
+          const badges = [];
+          if (o.yellow) badges.push(`<i class="bk bk-y" style="width:7px;height:10px;"></i>×${o.yellow}`);
+          if (o.red) badges.push(`<i class="bk bk-r" style="width:7px;height:10px;"></i>Out`);
+          return `
+            <li class="player-row ${o.red ? 'sent-off' : ''}">
+              <span class="p-name" style="margin-left:2px;">
+                <b><span class="off-role">${esc(o.role || 'Official')}</span>${esc(o.name)}</b>
+                ${badges.length ? `<span class="p-badges">${badges.join(' ')}</span>` : ''}
+              </span>
+              <span class="p-acts">
+                <button class="p-act" type="button" data-oy="${esc(o.id)}" title="${locked ? 'Match completed' : o.red ? 'Sent off' : 'Yellow card (Official)'}" ${locked || o.red ? 'disabled' : ''}><i class="bk bk-y" style="width:7px;height:10px;"></i></button>
+                <button class="p-act" type="button" data-or="${esc(o.id)}" title="${locked ? 'Match completed' : o.red ? 'Already sent off' : 'Red card (Official)'}" ${locked || o.red ? 'disabled' : ''}><i class="bk bk-r" style="width:7px;height:10px;"></i></button>
               </span>
             </li>
           `;
@@ -2719,12 +2956,12 @@
         container.innerHTML = `
           <div class="deck-head">
             <div>
-              <p class="kicker">GOAL SCORERS, ASSISTS &amp; CARDS</p>
-              <h3>${esc(t.name)} players</h3>
+              <p class="kicker">PLAYERS, OFFICIALS &amp; CARDS</p>
+              <h3>${esc(t.name)} squad</h3>
             </div>
-            ${state.linked ? `<span class="tag t-green" style="font-size:10px;">Synced · ${t.players.length}</span>` : ''}
+            ${state.linked ? `<span class="tag t-green" style="font-size:10px;">Synced · ${t.players.length}${officials.length ? ' + ' + officials.length : ''}</span>` : ''}
           </div>
-          ${state.linked ? '' : `
+          ${(state.linked || locked) ? '' : `
           <form class="roster-add-row" data-add-form>
             <input class="input" type="number" min="0" max="99" placeholder="#" data-pnum aria-label="Jersey number">
             <input class="input" type="text" maxlength="36" placeholder="Player name" data-pname aria-label="Player name">
@@ -2732,12 +2969,17 @@
           </form>`}
           <div class="scroll-area">
             ${t.players.length ? `<ul class="roster-list">${rows}</ul>` : `<p class="empty-note">${state.linked ? 'No players in this team in the main app yet' : 'No players added yet'}</p>`}
+            ${officials.length ? `
+              <div class="off-subhead"><span>Team Officials</span><span>${officials.length}</span></div>
+              <ul class="roster-list">${offRows}</ul>
+            ` : ''}
           </div>
         `;
 
         const addForm = container.querySelector('[data-add-form]');
         if (addForm) addForm.addEventListener('submit', e => {
           e.preventDefault();
+          if (guardEdit()) return;
           const numInp = container.querySelector('[data-pnum]');
           const nameInp = container.querySelector('[data-pname]');
           const name = nameInp.value.trim();
@@ -2748,18 +2990,28 @@
         });
 
         container.querySelectorAll('[data-pg]').forEach(b => b.addEventListener('click', () => {
+          if (guardEdit()) return;
           const p = t.players.find(x => x.id === b.dataset.pg);
           if (p) promptGoal(teamKey, p.name);
         }));
         container.querySelectorAll('[data-py]').forEach(b => b.addEventListener('click', () => {
           const p = t.players.find(x => x.id === b.dataset.py);
-          if (p) recordCard(teamKey, 'yellow', p.name);
+          if (p) recordCard(teamKey, 'yellow', p.name, false);
         }));
         container.querySelectorAll('[data-pr]').forEach(b => b.addEventListener('click', () => {
           const p = t.players.find(x => x.id === b.dataset.pr);
-          if (p) recordCard(teamKey, 'red', p.name);
+          if (p) recordCard(teamKey, 'red', p.name, false);
+        }));
+        container.querySelectorAll('[data-oy]').forEach(b => b.addEventListener('click', () => {
+          const o = officials.find(x => x.id === b.dataset.oy);
+          if (o) recordCard(teamKey, 'yellow', o.name, true, o.role);
+        }));
+        container.querySelectorAll('[data-or]').forEach(b => b.addEventListener('click', () => {
+          const o = officials.find(x => x.id === b.dataset.or);
+          if (o) recordCard(teamKey, 'red', o.name, true, o.role);
         }));
         container.querySelectorAll('[data-px]').forEach(b => b.addEventListener('click', () => {
+          if (guardEdit()) return;
           const target = t.players.find(x => x.id === b.dataset.px);
           if (state.linked || (target && target.fromMain)) {
             toast('Players loaded from the main app cannot be deleted here.');
@@ -2824,21 +3076,22 @@
 
       function renderClockAndTimers() {
         const isPen = state.period === 'Penalties';
-        const locked = isPeriodSwitchLocked();
+        const matchDone = isMatchLocked();
+        const locked = matchDone || isPeriodSwitchLocked();
         const draw = isDraw();
         const selP = document.getElementById('sel-period');
         const nextP = document.getElementById('btn-next-period');
         if (selP) {
           selP.disabled = locked;
-          selP.title = locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Match period';
+          selP.title = matchDone ? 'Match is completed' : (locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Match period');
           Array.from(selP.options).forEach(opt => {
-            opt.disabled = !canEnterPeriod(opt.value);
+            opt.disabled = matchDone || !canEnterPeriod(opt.value);
           });
         }
         if (nextP) {
           nextP.disabled = locked;
           nextP.className = (!locked && !isPen && state.status !== 'upcoming') ? 'btn btn-xs' : 'btn btn-ghost btn-xs';
-          nextP.title = locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Advance period';
+          nextP.title = matchDone ? 'Match is completed' : (locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Advance period');
           if (state.period === '2nd Half') nextP.textContent = draw ? 'Extra Time ›' : 'Complete ✓';
           else if (state.period === 'Extra Time 1') nextP.textContent = 'ET 2 ›';
           else if (state.period === 'Extra Time 2') nextP.textContent = draw ? 'Penalties ›' : 'Complete ✓';
@@ -2846,7 +3099,7 @@
           else nextP.textContent = 'Next ›';
         }
         const panel = document.getElementById('clock-panel');
-        panel.classList.toggle('is-running', state.clockRunning && !isPen);
+        panel.classList.toggle('is-running', state.clockRunning && !isPen && !matchDone);
         panel.classList.toggle('is-penalties', isPen);
 
         document.getElementById('timed-mode-ui').hidden = isPen;
@@ -2857,12 +3110,12 @@
         } else {
           const disp = document.getElementById('clock-display');
           disp.textContent = fmtClock(state.clockSec);
-          disp.classList.toggle('is-zero', state.clockSec === 0);
+          disp.classList.toggle('is-zero', state.clockSec === 0 && !matchDone);
 
           const addRow = document.getElementById('added-time-row');
           const addBadge = document.getElementById('added-time-badge');
           const addText = document.getElementById('added-time-text');
-          const showAdd = isPlayingHalf() && state.status !== 'done';
+          const showAdd = isPlayingHalf() && !matchDone;
           if (addRow) addRow.hidden = !showAdd;
           const addSec = state.addedTime || 0;
           if (addBadge && addText) {
@@ -2879,10 +3132,21 @@
           }
 
           const toggleBtn = document.getElementById('btn-clock-toggle');
+          toggleBtn.disabled = matchDone;
           toggleBtn.className = state.clockRunning ? 'btn btn-live' : 'btn';
-          toggleBtn.innerHTML = state.clockRunning
-            ? `<svg class="i"><use href="#ic-pause"/></svg><span>Pause</span>`
-            : `<svg class="i"><use href="#ic-play"/></svg><span>Start clock</span>`;
+          toggleBtn.innerHTML = matchDone
+            ? `<svg class="i"><use href="#ic-pause"/></svg><span>Completed</span>`
+            : state.clockRunning
+              ? `<svg class="i"><use href="#ic-pause"/></svg><span>Pause</span>`
+              : `<svg class="i"><use href="#ic-play"/></svg><span>Start clock</span>`;
+
+          const rstBtn = document.getElementById('btn-clock-reset');
+          if (rstBtn) rstBtn.disabled = matchDone;
+          document.querySelectorAll('[data-nudge]').forEach(b => { b.disabled = matchDone; });
+          const hmInp = document.getElementById('inp-half-mins');
+          const bmInp = document.getElementById('inp-break-mins');
+          if (hmInp) hmInp.disabled = matchDone;
+          if (bmInp) bmInp.disabled = matchDone;
         }
 
         const tb = document.getElementById('timeout-banner');
@@ -2933,28 +3197,63 @@
       function renderEvents() {
         const list = document.getElementById('events-list');
         const empty = document.getElementById('events-empty');
+        const clearBtn = document.getElementById('btn-clear-events');
+        const locked = isMatchLocked();
+        if (clearBtn) clearBtn.hidden = locked;
         empty.hidden = state.events.length > 0;
-        list.innerHTML = state.events.map(ev => {
-          let ic = '•';
-          if (ev.type === 'goal') ic = '⚽';
-          else if (ev.type === 'yellow') ic = '<i class="bk bk-y"></i>';
-          else if (ev.type === 'red') ic = '<i class="bk bk-r"></i>';
-          else if (ev.type === 'foul') ic = '⚠️';
-          else if (ev.type === 'timeout') ic = '⏱️';
-          return `
-            <li class="ev-item">
-              <span class="ev-time">${esc(ev.clock)}</span>
-              <span style="display:grid;place-items:center;width:16px;flex:none;">${ic}</span>
-              <span class="ev-body">
-                <b>${esc(ev.label)}</b>
-                <small>${esc(ev.period)}${ev.detail ? ' · ' + esc(ev.detail) : ''}</small>
-              </span>
-              <button class="ev-del" type="button" data-ev-del="${ev.id}" aria-label="Remove event">×</button>
-            </li>
-          `;
+
+        // Group events half-wise so managers and admins can browse the full half-by-half timeline
+        const order = ['1st Half', 'Half-Time', '2nd Half', 'Extra Time 1', 'Extra Time 2', 'Penalties'];
+        const chron = state.events.slice().reverse();
+        const groups = [];
+        const byP = new Map();
+        chron.forEach(ev => {
+          const p = ev.period || 'Other';
+          if (!byP.has(p)) byP.set(p, []);
+          byP.get(p).push(ev);
+        });
+        const sortedPeriods = Array.from(byP.keys()).sort((a, b) => {
+          const ia = order.indexOf(a), ib = order.indexOf(b);
+          return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        });
+        // While live show newest half on top; when completed show chronological 1st Half -> 2nd Half -> ET -> Penalties
+        if (!locked) sortedPeriods.reverse();
+
+        list.innerHTML = sortedPeriods.map(p => {
+          const items = byP.get(p);
+          const displayItems = locked ? items : items.slice().reverse();
+          const gCnt = items.filter(e => e.type === 'goal').length;
+          const fCnt = items.filter(e => e.type === 'foul').length;
+          const cCnt = items.filter(e => e.type === 'yellow' || e.type === 'red').length;
+          const bits = [];
+          if (gCnt) bits.push(`${gCnt} goal${gCnt > 1 ? 's' : ''}`);
+          if (fCnt) bits.push(`${fCnt} foul${fCnt > 1 ? 's' : ''}`);
+          if (cCnt) bits.push(`${cCnt} card${cCnt > 1 ? 's' : ''}`);
+          const head = `<li class="ev-group-head"><span>${esc(p)}</span><small>${bits.join(' · ') || `${items.length} event${items.length > 1 ? 's' : ''}`}</small></li>`;
+          const rows = displayItems.map(ev => {
+            let ic = '•';
+            if (ev.type === 'goal') ic = '⚽';
+            else if (ev.type === 'yellow') ic = '<i class="bk bk-y"></i>';
+            else if (ev.type === 'red') ic = '<i class="bk bk-r"></i>';
+            else if (ev.type === 'foul') ic = '⚠️';
+            else if (ev.type === 'timeout') ic = '⏱️';
+            return `
+              <li class="ev-item">
+                <span class="ev-time">${esc(ev.clock)}</span>
+                <span style="display:grid;place-items:center;width:16px;flex:none;">${ic}</span>
+                <span class="ev-body">
+                  <b>${esc(ev.label)}</b>
+                  <small>${ev.detail ? esc(ev.detail) : esc(ev.period)}</small>
+                </span>
+                ${locked ? '' : `<button class="ev-del" type="button" data-ev-del="${ev.id}" aria-label="Remove event">×</button>`}
+              </li>
+            `;
+          }).join('');
+          return head + rows;
         }).join('');
 
         list.querySelectorAll('[data-ev-del]').forEach(b => b.addEventListener('click', () => {
+          if (guardEdit()) return;
           state.events = state.events.filter(x => x.id !== b.dataset.evDel);
           saveState(); renderEvents();
         }));
@@ -2962,6 +3261,7 @@
 
       function render() {
         const s = sides();
+        const locked = isMatchLocked();
         const badge = document.getElementById('match-status-badge');
         const statusMap = {
           upcoming: ['UPCOMING', 'upcoming'],
@@ -2975,15 +3275,22 @@
 
         const matchBtn = document.getElementById('btn-match-state');
         if (state.status === 'upcoming') {
+          matchBtn.hidden = false;
           matchBtn.textContent = 'Start match';
           matchBtn.className = 'btn btn-sm';
         } else if (state.status === 'done') {
+          // Only Super Admin (admin role) can reopen a completed match; Managers view read-only
+          matchBtn.hidden = !isSuperAdmin();
           matchBtn.textContent = 'Reopen';
           matchBtn.className = 'btn btn-ghost btn-sm';
         } else {
+          matchBtn.hidden = false;
           matchBtn.textContent = 'Mark completed';
           matchBtn.className = 'btn btn-live btn-sm';
         }
+
+        const resetBtn = document.getElementById('btn-reset-match');
+        if (resetBtn) resetBtn.hidden = locked && !isSuperAdmin();
 
         // After full time, offer the next match of the same tournament
         const nextBtn = document.getElementById('btn-next-match');
@@ -3021,8 +3328,12 @@
           toast('Match started!');
           saveState(); render();
         } else if (state.status === 'done') {
+          if (!isSuperAdmin()) {
+            toast('Only Admin can reopen or edit a completed match.');
+            return;
+          }
           state.status = 'live';
-          toast('Match reopened');
+          toast('Match reopened by Admin');
           saveState(); render();
         } else {
           completeMatch();
@@ -3049,6 +3360,7 @@
       });
 
       document.getElementById('btn-clock-toggle').addEventListener('click', () => {
+        if (guardEdit()) return;
         if (state.clockSec === 0) return;
         state.clockRunning = !state.clockRunning;
         if (state.clockRunning) { lastTick = Date.now(); state.tickAt = lastTick; }
@@ -3057,6 +3369,7 @@
       });
 
       document.getElementById('btn-clock-reset').addEventListener('click', () => {
+        if (guardEdit()) return;
         state.clockRunning = false;
         state.addedTime = 0;
         state.clockSec = (state.period === 'Half-Time' ? state.breakMinutes : (state.period.startsWith('Extra') ? 5 : state.halfMinutes)) * 60;
@@ -3066,13 +3379,17 @@
 
       document.querySelectorAll('[data-nudge]').forEach(b => {
         b.addEventListener('click', () => {
+          if (guardEdit()) return;
           state.clockSec = Math.max(0, state.clockSec + Number(b.dataset.nudge));
           saveState(); renderClockAndTimers();
         });
       });
 
       document.querySelectorAll('[data-add-et]').forEach(b => {
-        b.addEventListener('click', () => addHalfExtraTime(Number(b.dataset.addEt)));
+        b.addEventListener('click', () => {
+          if (guardEdit()) return;
+          addHalfExtraTime(Number(b.dataset.addEt));
+        });
       });
 
       document.getElementById('btn-add-et-custom').addEventListener('click', () => {
@@ -3258,6 +3575,7 @@
       document.getElementById('btn-report-top').addEventListener('click', openMatchReport);
 
       document.getElementById('btn-clear-events').addEventListener('click', () => {
+        if (guardEdit()) return;
         if (!state.events.length) return;
         state.events = [];
         saveState(); renderEvents();
@@ -3265,6 +3583,10 @@
       });
 
       document.getElementById('btn-reset-match').addEventListener('click', () => {
+        if (isMatchLocked() && !isSuperAdmin()) {
+          toast('Only Admin can reset a completed match.');
+          return;
+        }
         const isLinked = !!state.linked;
         openModal(
           'Reset Match?',
@@ -3570,6 +3892,25 @@
         return list;
       }
 
+      function extractSquadOfficials(team, teamId, srcCards, existingOfficials) {
+        const raw = Array.isArray(team && team.officials) ? team.officials : [];
+        const prevByName = new Map();
+        (existingOfficials || []).forEach(o => {
+          if (o.name) prevByName.set(String(o.name).trim().toLowerCase(), o);
+        });
+        return raw.map((item, idx) => {
+          const isStr = typeof item === 'string';
+          const name = (isStr ? item : (item && (item.name || item.fullName) || '')).trim();
+          if (!name) return null;
+          const role = isStr ? 'Official' : ((item.role || 'Official').trim());
+          const id = (!isStr && item.id) ? String(item.id) : (`off_${teamId}_${idx}_${name.toLowerCase().replace(/[^a-z0-9]+/g, '')}`);
+          const prev = prevByName.get(name.toLowerCase());
+          const yCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'y').length : (prev ? prev.yellow : 0);
+          const rCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'r').length : (prev ? prev.red : 0);
+          return { id, role, name, yellow: yCount, red: rCount, fromMain: true };
+        }).filter(Boolean);
+      }
+
       function syncLinkedRostersFromCloud() {
         if (!state.linked || !cloud.tournaments.length) return;
         const t = cloud.tournaments.find(x => x.id === state.linked.tournamentId);
@@ -3582,15 +3923,15 @@
         [['home', homeTeam, m.home], ['away', awayTeam, m.away]].forEach(([tk, team, tid]) => {
           if (!team) return;
           const synced = extractSquadPlayers(team, tid, null, null, state.teams[tk].players);
-          if (synced.length || !state.teams[tk].players.length) {
-            const prevSig = JSON.stringify(state.teams[tk].players.map(p => [p.id, p.num, p.name, p.fromMain]));
-            const nextSig = JSON.stringify(synced.map(p => [p.id, p.num, p.name, p.fromMain]));
-            if (prevSig !== nextSig || state.teams[tk].name !== team.name) {
-              state.teams[tk].name = team.name;
-              if (team.c1) state.teams[tk].color = team.c1;
-              state.teams[tk].players = synced;
-              changed = true;
-            }
+          const syncedOff = extractSquadOfficials(team, tid, null, state.teams[tk].officials);
+          const prevSig = JSON.stringify([state.teams[tk].players.map(p => [p.id, p.num, p.name, p.fromMain]), (state.teams[tk].officials || []).map(o => [o.id, o.role, o.name])]);
+          const nextSig = JSON.stringify([synced.map(p => [p.id, p.num, p.name, p.fromMain]), syncedOff.map(o => [o.id, o.role, o.name])]);
+          if (prevSig !== nextSig || state.teams[tk].name !== team.name) {
+            state.teams[tk].name = team.name;
+            if (team.c1) state.teams[tk].color = team.c1;
+            state.teams[tk].players = synced;
+            state.teams[tk].officials = syncedOff;
+            changed = true;
           }
         });
         if (changed) {
@@ -3684,7 +4025,8 @@
           score: isPlayed ? m.hs : (m.lh || 0),
           fouls: (ref && ref.fouls && ref.fouls.h != null) ? ref.fouls.h : ((m.fouls && m.fouls.h) || 0),
           timeouts: toArr(ref && ref.timeouts && ref.timeouts.h, (m.timeouts && m.timeouts.h) || 0),
-          players: mapPlayers(homeTeam, m.home, pfHome)
+          players: mapPlayers(homeTeam, m.home, pfHome),
+          officials: extractSquadOfficials(homeTeam, m.home, srcCards)
         };
         fresh.teams.away = {
           name: awayTeam.name,
@@ -3692,7 +4034,8 @@
           score: isPlayed ? m.as : (m.la || 0),
           fouls: (ref && ref.fouls && ref.fouls.a != null) ? ref.fouls.a : ((m.fouls && m.fouls.a) || 0),
           timeouts: toArr(ref && ref.timeouts && ref.timeouts.a, (m.timeouts && m.timeouts.a) || 0),
-          players: mapPlayers(awayTeam, m.away, pfAway)
+          players: mapPlayers(awayTeam, m.away, pfAway),
+          officials: extractSquadOfficials(awayTeam, m.away, srcCards)
         };
         fresh.events = restoredEvents;
 
@@ -3969,6 +4312,7 @@
               } catch (e) {}
               updateSyncPill();
               updateGate();
+              render();
               if (!connectModal.hidden) renderConnectModal();
             });
 
