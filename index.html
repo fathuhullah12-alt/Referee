@@ -1699,7 +1699,10 @@
       }
 
       let state = loadState();
-      state.clockRunning = false;
+      // Clock follows real time: if it was running when the page closed, carry on from where it should be
+      let lastTick = Date.now();
+      if (state.clockRunning && state.tickAt && Date.now() - state.tickAt < 3 * 3600 * 1000) lastTick = state.tickAt;
+      else state.clockRunning = false;
       if (!state.shootout) state.shootout = { kicks: [] };
 
       function loadState() {
@@ -1771,8 +1774,23 @@
         });
       }
 
-      // Main 1-second Clock Loop
-      setInterval(() => {
+      // Main clock loop: counts real seconds passed, so a locked screen or background tab doesn't slow it
+      function clockLoop() {
+        const now = Date.now();
+        let steps = Math.floor((now - lastTick) / 1000);
+        if (steps < 1) return;
+        lastTick += steps * 1000;
+        if (steps > 4 * 3600) steps = 4 * 3600;
+        let any = false;
+        for (let i = 0; i < steps; i++) { if (tickOnce()) any = true; else if (!state.clockRunning && !state.timeout) break; }
+        state.tickAt = lastTick;
+        if (any) {
+          // Clock ticks stay on this device (no cloud sync, no "Saving…" flash)
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+          renderClockAndTimers();
+        }
+      }
+      function tickOnce() {
         let changed = false;
 
         if (state.timeout && state.timeout.sec > 0) {
@@ -1817,12 +1835,11 @@
           }
         }
 
-        if (changed) {
-          // Clock ticks stay on this device (no cloud sync, no "Saving…" flash)
-          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-          renderClockAndTimers();
-        }
-      }, 1000);
+        return changed;
+      }
+      setInterval(clockLoop, 250);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) clockLoop(); });
+      window.addEventListener('pageshow', clockLoop);
 
       // Modals
       const actionModal = document.getElementById('action-modal');
@@ -2650,6 +2667,7 @@
           state.status = 'live';
           if (!state.kickAt) state.kickAt = Date.now();
           if (state.period !== 'Penalties') state.clockRunning = true;
+          lastTick = Date.now(); state.tickAt = lastTick;
           addEvent('home', 'info', 'Match started', `${state.teams.home.name} vs ${state.teams.away.name}`);
           playBuzzer(300, 520);
           toast('Match started!');
@@ -2669,6 +2687,7 @@
       document.getElementById('btn-clock-toggle').addEventListener('click', () => {
         if (state.clockSec === 0) return;
         state.clockRunning = !state.clockRunning;
+        if (state.clockRunning) { lastTick = Date.now(); state.tickAt = lastTick; }
         if (state.clockRunning && state.status === 'upcoming') state.status = 'live';
         saveState(); renderClockAndTimers();
       });
