@@ -2045,32 +2045,90 @@
 
       function promptPenalty(teamKey) {
         const team = state.teams[teamKey];
-        openModal(
-          `Penalty · ${team.name}`,
-          `<p style="margin:0;color:var(--fg-muted);font-size:13.5px;">In-game penalty kick outcome (6m or 10m).</p>
-           <div class="pick-grid">
-             <button class="btn" type="button" id="am-p6-goal">6m Penalty · Scored</button>
-             <button class="btn btn-ghost" type="button" id="am-p6-miss">6m Penalty · Missed</button>
-             <button class="btn" type="button" id="am-p10-goal">10m Kick · Scored</button>
-             <button class="btn btn-ghost" type="button" id="am-p10-miss">10m Kick · Missed</button>
-           </div>`,
-          (body) => {
-            const finish = (label, scored) => {
-              if (scored) {
-                team.score += 1;
-                if (state.status === 'upcoming') state.status = 'live';
+        const eligible = team.players.filter(p => !p.red);
+        let selectedPlayer = '';
+        let penKind = '6m Penalty';
+
+        const renderPenBody = (body) => {
+          const playerBtns = eligible.map(p =>
+            `<button class="pick-btn ${selectedPlayer === p.name ? 'selected' : ''}" type="button" data-pen-p="${esc(p.name)}">
+              <span class="p-num">${esc(p.num || '–')}</span><span>${esc(p.name)}</span>
+            </button>`
+          ).join('');
+          const playerOpts = eligible.map(p =>
+            `<option value="${esc(p.name)}" ${selectedPlayer === p.name ? 'selected' : ''}>${p.num ? '#' + esc(p.num) + ' ' : ''}${esc(p.name)}</option>`
+          ).join('');
+
+          body.innerHTML = `
+            <div style="display:grid;gap:6px;">
+              <p class="kicker">1. PENALTY TYPE</p>
+              <div class="pick-grid">
+                <button class="pick-btn ${penKind === '6m Penalty' ? 'selected' : ''}" type="button" data-pen-kind="6m Penalty">6m Penalty</button>
+                <button class="pick-btn ${penKind === '10m Free Kick' ? 'selected' : ''}" type="button" data-pen-kind="10m Free Kick">10m Direct Free Kick</button>
+              </div>
+            </div>
+            <div style="display:grid;gap:7px;padding-top:8px;border-top:1px dashed var(--line);">
+              <p class="kicker">2. SELECT PENALTY TAKER</p>
+              ${eligible.length
+                ? `<select class="input" id="am-pen-sel" aria-label="Select penalty taker">
+                     <option value="">Choose player from ${esc(team.name)}…</option>
+                     ${playerOpts}
+                   </select>
+                   <div class="pick-grid">${playerBtns}</div>`
+                : `<p class="empty-note" style="padding:10px;font-size:12.5px;">No players added for ${esc(team.name)} yet. Type a player name here:</p>`
               }
-              addEvent(teamKey, scored ? 'goal' : 'info', `${label} · ${scored ? 'Scored' : 'Missed'}`, team.name);
-              actionModal.hidden = true;
-              saveState(); render();
-              toast(`${label} ${scored ? 'scored' : 'missed'} (${team.name})`);
-            };
-            body.querySelector('#am-p6-goal').addEventListener('click', () => finish('6m Penalty', true));
-            body.querySelector('#am-p6-miss').addEventListener('click', () => finish('6m Penalty', false));
-            body.querySelector('#am-p10-goal').addEventListener('click', () => finish('10m Free Kick', true));
-            body.querySelector('#am-p10-miss').addEventListener('click', () => finish('10m Free Kick', false));
-          }
-        );
+              <input class="input" id="am-pen-txt" type="text" placeholder="Type player name / # (optional)" value="${esc(selectedPlayer)}">
+            </div>
+            <div style="display:grid;gap:6px;padding-top:8px;border-top:1px dashed var(--line);">
+              <p class="kicker">3. OUTCOME</p>
+              <div class="pick-grid">
+                <button class="btn" type="button" id="am-pen-goal">✓ Scored (+1 Goal)</button>
+                <button class="btn btn-danger" type="button" id="am-pen-miss">× Saved / Missed</button>
+              </div>
+            </div>
+          `;
+
+          body.querySelectorAll('[data-pen-kind]').forEach(b => {
+            b.addEventListener('click', () => { penKind = b.dataset.penKind; renderPenBody(body); });
+          });
+          const selEl = body.querySelector('#am-pen-sel');
+          if (selEl) selEl.addEventListener('change', e => { selectedPlayer = e.target.value; renderPenBody(body); });
+          body.querySelectorAll('[data-pen-p]').forEach(b => {
+            b.addEventListener('click', () => {
+              selectedPlayer = selectedPlayer === b.dataset.penP ? '' : b.dataset.penP;
+              renderPenBody(body);
+            });
+          });
+          body.querySelector('#am-pen-txt').addEventListener('input', e => { selectedPlayer = e.target.value.trim(); });
+
+          const finish = (scored) => {
+            const kicker = selectedPlayer;
+            if (scored) {
+              team.score += 1;
+              if (state.status === 'upcoming') state.status = 'live';
+              if (kicker) {
+                const pl = team.players.find(x => x.name === kicker);
+                if (pl) pl.goals = (pl.goals || 0) + 1;
+              }
+              const oppKey = teamKey === 'home' ? 'away' : 'home';
+              const mySusp = state.suspensions.filter(s => s.team === teamKey);
+              const oppSusp = state.suspensions.filter(s => s.team === oppKey);
+              if (oppSusp.length > mySusp.length) {
+                const cleared = oppSusp[0];
+                state.suspensions = state.suspensions.filter(s => s.id !== cleared.id);
+                addEvent(oppKey, 'info', '2-min suspension ended (goal)', `${state.teams[oppKey].name} may bring on a replacement`, cleared.player);
+              }
+            }
+            const detail = kicker ? `${kicker} · ${team.name}` : team.name;
+            addEvent(teamKey, scored ? 'goal' : 'info', `${penKind} · ${scored ? 'Scored' : 'Missed'}`, detail, kicker);
+            actionModal.hidden = true;
+            saveState(); render();
+            toast(`${penKind} ${scored ? 'scored' : 'missed'}${kicker ? ' by ' + kicker : ''} (${team.name})`);
+          };
+          body.querySelector('#am-pen-goal').addEventListener('click', () => finish(true));
+          body.querySelector('#am-pen-miss').addEventListener('click', () => finish(false));
+        };
+        openModal(`Penalty · ${team.name}`, '', (body) => renderPenBody(body));
       }
 
       function triggerTimeout(teamKey) {
@@ -2095,17 +2153,64 @@
         saveState(); render();
       }
 
+      function recordFoul(teamKey, playerName = '') {
+        const team = state.teams[teamKey];
+        team.fouls = Math.max(0, team.fouls + 1);
+        if (playerName) {
+          const p = team.players.find(x => x.name === playerName);
+          if (p) p.fouls = (p.fouls || 0) + 1;
+        }
+        const note = team.fouls >= 6 ? `Foul #${team.fouls} (10m Direct Free Kick!)` : `Foul #${team.fouls} / 5`;
+        const detail = playerName ? `${playerName} (${team.name}) · ${note}` : `${team.name} · ${note}`;
+        addEvent(teamKey, 'foul', 'Accumulated foul', detail, playerName);
+        if (team.fouls >= 6) {
+          playBuzzer(450, 460);
+          toast(`${team.name}: Foul #${team.fouls}${playerName ? ' (' + playerName + ')' : ''} — 10m Direct Free Kick!`);
+        } else {
+          toast(`Foul #${team.fouls} · ${playerName || team.name}`);
+        }
+        saveState(); render();
+      }
+
+      function promptFoul(teamKey) {
+        const team = state.teams[teamKey];
+        const eligible = team.players.filter(p => !p.red);
+        const playerBtns = eligible.map(p =>
+          `<button class="pick-btn" type="button" data-foul-p="${esc(p.name)}">
+            <span class="p-num">${esc(p.num || '–')}</span>
+            <span>${esc(p.name)}${p.fouls ? ` <small style="color:var(--amber-fg);">(⚠️${p.fouls})</small>` : ''}</span>
+          </button>`
+        ).join('');
+        const nextNum = team.fouls + 1;
+        openModal(
+          `Accumulated Foul #${nextNum} · ${team.name}`,
+          `<p style="margin:0;color:var(--fg-muted);font-size:13px;">Select the player who committed the foul${nextNum >= 6 ? ' (10m Direct Free Kick!)' : ''}.</p>
+           ${eligible.length ? `<div class="pick-grid">${playerBtns}</div>` : `<p class="empty-note" style="padding:10px;font-size:12.5px;">No players added for ${esc(team.name)} yet. Type a player name below:</p>`}
+           <input class="input" id="am-foul-txt" type="text" placeholder="Or type player name / # (optional)">`,
+          (body, acts) => {
+            body.querySelectorAll('[data-foul-p]').forEach(b => {
+              b.addEventListener('click', () => {
+                actionModal.hidden = true;
+                recordFoul(teamKey, b.dataset.foulP);
+              });
+            });
+            acts.querySelector('#am-foul-ok').addEventListener('click', () => {
+              const val = body.querySelector('#am-foul-txt').value.trim();
+              actionModal.hidden = true;
+              recordFoul(teamKey, val);
+            });
+          },
+          `<button class="btn btn-amber btn-sm" type="button" id="am-foul-ok">Record Foul</button>`
+        );
+      }
+
       function adjustFoul(teamKey, delta) {
+        if (delta > 0) {
+          promptFoul(teamKey);
+          return;
+        }
         const team = state.teams[teamKey];
         team.fouls = Math.max(0, team.fouls + delta);
-        if (delta > 0) {
-          const note = team.fouls >= 6 ? `Foul #${team.fouls} (10m Direct Free Kick!)` : `Foul #${team.fouls} / 5`;
-          addEvent(teamKey, 'foul', 'Accumulated foul', `${team.name} · ${note}`);
-          if (team.fouls >= 6) {
-            playBuzzer(450, 460);
-            toast(`${team.name}: Foul #${team.fouls} — 10m Direct Free Kick!`);
-          }
-        }
         saveState(); render();
       }
 
@@ -2135,13 +2240,50 @@
         return { hKicks, aKicks, hScore, aScore, slots, round, suddenDeath, winner };
       }
 
-      function recordShootoutKick(teamKey, scored) {
+      function recordShootoutKick(teamKey, scored, playerName = '') {
         if (state.status === 'upcoming') state.status = 'live';
-        state.shootout.kicks.push({ id: uid(), team: teamKey, scored });
+        state.shootout.kicks.push({ id: uid(), team: teamKey, scored, player: playerName });
         const team = state.teams[teamKey];
-        addEvent(teamKey, scored ? 'goal' : 'info', `Shootout · ${scored ? 'Scored' : 'Missed'}`, team.name);
+        const detail = playerName ? `${playerName} · ${team.name}` : team.name;
+        addEvent(teamKey, scored ? 'goal' : 'info', `Shootout · ${scored ? 'Scored' : 'Missed'}`, detail, playerName);
         saveState(); render();
       }
+
+      function promptShootoutKick(teamKey, scored) {
+        const team = state.teams[teamKey];
+        const eligible = team.players.filter(p => !p.red);
+        const takenNames = state.shootout.kicks.filter(k => k.team === teamKey && k.player).map(k => k.player);
+        const playerBtns = eligible.map(p => {
+          const count = takenNames.filter(n => n === p.name).length;
+          return `<button class="pick-btn" type="button" data-so-p="${esc(p.name)}">
+            <span class="p-num">${esc(p.num || '–')}</span>
+            <span>${esc(p.name)}${count ? ` <small style="color:var(--fg-muted);">(×${count})</small>` : ''}</span>
+          </button>`;
+        }).join('');
+
+        openModal(
+          `Shootout ${scored ? 'Goal ✓' : 'Miss ×'} · ${team.name}`,
+          `<p style="margin:0;color:var(--fg-muted);font-size:13px;">Select the penalty taker (sent-off players are ineligible per FIFA rules).</p>
+           ${eligible.length ? `<div class="pick-grid">${playerBtns}</div>` : `<p class="empty-note" style="padding:10px;font-size:12.5px;">No players added for ${esc(team.name)} yet. Type a name below:</p>`}
+           <input class="input" id="am-so-txt" type="text" placeholder="Type player name / # (optional)">`,
+          (body, acts) => {
+            body.querySelectorAll('[data-so-p]').forEach(b => {
+              b.addEventListener('click', () => {
+                actionModal.hidden = true;
+                recordShootoutKick(teamKey, scored, b.dataset.soP);
+              });
+            });
+            acts.querySelector('#am-so-ok').addEventListener('click', () => {
+              const val = body.querySelector('#am-so-txt').value.trim();
+              actionModal.hidden = true;
+              recordShootoutKick(teamKey, scored, val);
+            });
+          },
+          `<button class="btn btn-sm" type="button" id="am-so-ok">Record ${scored ? 'Goal' : 'Miss'}</button>`
+        );
+      }
+
+      const shootoutPick = { home: '', away: '' };
 
       function renderShootoutPanel() {
         const box = document.getElementById('shootout-mode-ui');
@@ -2154,12 +2296,16 @@
 
         const renderTeamRow = (teamKey, kicks) => {
           const t = state.teams[teamKey];
+          const eligible = t.players.filter(p => !p.red);
           let dots = '';
           for (let i = 0; i < st.slots; i++) {
             const k = kicks[i];
             if (!k) dots += `<span class="so-dot">${i + 1}</span>`;
-            else dots += `<span class="so-dot ${k.scored ? 'hit' : 'miss'}">${k.scored ? '✓' : '×'}</span>`;
+            else dots += `<span class="so-dot ${k.scored ? 'hit' : 'miss'}" title="${esc(k.player || (k.scored ? 'Scored' : 'Missed'))}">${k.scored ? '✓' : '×'}</span>`;
           }
+          const opts = eligible.map(p =>
+            `<option value="${esc(p.name)}" ${shootoutPick[teamKey] === p.name ? 'selected' : ''}>${p.num ? '#' + esc(p.num) + ' ' : ''}${esc(p.name)}</option>`
+          ).join('');
           return `
             <div class="so-team-row">
               <div class="so-team-top">
@@ -2169,6 +2315,10 @@
                   <button class="btn btn-danger btn-xs" type="button" data-so-miss="${teamKey}">× Miss</button>
                 </div>
               </div>
+              <select class="input" data-so-sel="${teamKey}" style="min-height:28px;padding:3px 8px;font-size:12px;" aria-label="Penalty taker for ${esc(t.name)}">
+                <option value="">${eligible.length ? 'Select penalty taker…' : 'No players added yet (will prompt)'}</option>
+                ${opts}
+              </select>
               <div class="so-dots">${dots}</div>
             </div>
           `;
@@ -2191,8 +2341,19 @@
           </div>
         `;
 
-        box.querySelectorAll('[data-so-hit]').forEach(b => b.addEventListener('click', () => recordShootoutKick(b.dataset.soHit, true)));
-        box.querySelectorAll('[data-so-miss]').forEach(b => b.addEventListener('click', () => recordShootoutKick(b.dataset.soMiss, false)));
+        box.querySelectorAll('[data-so-sel]').forEach(sel => sel.addEventListener('change', e => {
+          shootoutPick[sel.dataset.soSel] = e.target.value;
+        }));
+        box.querySelectorAll('[data-so-hit]').forEach(b => b.addEventListener('click', () => {
+          const tk = b.dataset.soHit;
+          if (shootoutPick[tk]) { const p = shootoutPick[tk]; shootoutPick[tk] = ''; recordShootoutKick(tk, true, p); }
+          else promptShootoutKick(tk, true);
+        }));
+        box.querySelectorAll('[data-so-miss]').forEach(b => b.addEventListener('click', () => {
+          const tk = b.dataset.soMiss;
+          if (shootoutPick[tk]) { const p = shootoutPick[tk]; shootoutPick[tk] = ''; recordShootoutKick(tk, false, p); }
+          else promptShootoutKick(tk, false);
+        }));
         box.querySelector('#btn-so-undo').addEventListener('click', () => {
           state.shootout.kicks.pop();
           saveState(); render();
@@ -2456,6 +2617,7 @@
           const badges = [];
           if (p.goals) badges.push(`⚽${p.goals}`);
           if (p.assists) badges.push(`🅰️${p.assists}`);
+          if (p.fouls) badges.push(`⚠️${p.fouls}`);
           if (p.yellow) badges.push(`<i class="bk bk-y" style="width:7px;height:10px;"></i>×${p.yellow}`);
           if (p.red) badges.push(`<i class="bk bk-r" style="width:7px;height:10px;"></i>Out`);
           return `
@@ -2469,7 +2631,7 @@
                 <button class="p-act" type="button" data-pg="${esc(p.id)}" title="${p.red ? 'Sent off — cannot return' : 'Goal (choose assist)'}" ${p.red ? 'disabled' : ''}>⚽</button>
                 <button class="p-act" type="button" data-py="${esc(p.id)}" title="${p.red ? 'Sent off' : 'Yellow card'}" ${p.red ? 'disabled' : ''}><i class="bk bk-y" style="width:7px;height:10px;"></i></button>
                 <button class="p-act" type="button" data-pr="${esc(p.id)}" title="${p.red ? 'Already sent off' : 'Red card (2:00)'}" ${p.red ? 'disabled' : ''}><i class="bk bk-r" style="width:7px;height:10px;"></i></button>
-                <button class="p-act" type="button" data-px="${esc(p.id)}" title="Remove player" style="color:var(--fg-dim);">×</button>
+                ${(state.linked || p.fromMain) ? '' : `<button class="p-act" type="button" data-px="${esc(p.id)}" title="Remove player" style="color:var(--fg-dim);">×</button>`}
               </span>
             </li>
           `;
@@ -2481,24 +2643,27 @@
               <p class="kicker">GOAL SCORERS, ASSISTS &amp; CARDS</p>
               <h3>${esc(t.name)} players</h3>
             </div>
+            ${state.linked ? `<span class="tag t-green" style="font-size:10px;">Synced · ${t.players.length}</span>` : ''}
           </div>
+          ${state.linked ? '' : `
           <form class="roster-add-row" data-add-form>
             <input class="input" type="number" min="0" max="99" placeholder="#" data-pnum aria-label="Jersey number">
             <input class="input" type="text" maxlength="36" placeholder="Player name" data-pname aria-label="Player name">
             <button class="btn btn-sm" type="submit">+ Add</button>
-          </form>
+          </form>`}
           <div class="scroll-area">
-            ${t.players.length ? `<ul class="roster-list">${rows}</ul>` : `<p class="empty-note">No players added yet</p>`}
+            ${t.players.length ? `<ul class="roster-list">${rows}</ul>` : `<p class="empty-note">${state.linked ? 'No players in this team in the main app yet' : 'No players added yet'}</p>`}
           </div>
         `;
 
-        container.querySelector('[data-add-form]').addEventListener('submit', e => {
+        const addForm = container.querySelector('[data-add-form]');
+        if (addForm) addForm.addEventListener('submit', e => {
           e.preventDefault();
           const numInp = container.querySelector('[data-pnum]');
           const nameInp = container.querySelector('[data-pname]');
           const name = nameInp.value.trim();
           if (!name) { nameInp.focus(); return; }
-          t.players.push({ id: uid(), num: numInp.value.trim(), name, goals: 0, assists: 0, yellow: 0, red: 0 });
+          t.players.push({ id: uid(), num: numInp.value.trim(), name, goals: 0, assists: 0, fouls: 0, yellow: 0, red: 0 });
           saveState(); render();
           toast(`Added ${name} to ${t.name}`);
         });
@@ -2516,13 +2681,36 @@
           if (p) recordCard(teamKey, 'red', p.name);
         }));
         container.querySelectorAll('[data-px]').forEach(b => b.addEventListener('click', () => {
+          const target = t.players.find(x => x.id === b.dataset.px);
+          if (state.linked || (target && target.fromMain)) {
+            toast('Players loaded from the main app cannot be deleted here.');
+            return;
+          }
           t.players = t.players.filter(x => x.id !== b.dataset.px);
           saveState(); render();
         }));
       }
 
+      function isPeriodSwitchLocked() {
+        if (state.period === 'Penalties') return false;
+        if (state.status === 'upcoming') return false;
+        return state.clockSec > 0;
+      }
+
       function renderClockAndTimers() {
         const isPen = state.period === 'Penalties';
+        const locked = isPeriodSwitchLocked();
+        const selP = document.getElementById('sel-period');
+        const nextP = document.getElementById('btn-next-period');
+        if (selP) {
+          selP.disabled = locked;
+          selP.title = locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Match period';
+        }
+        if (nextP) {
+          nextP.disabled = locked;
+          nextP.className = (!locked && !isPen && state.status !== 'upcoming') ? 'btn btn-xs' : 'btn btn-ghost btn-xs';
+          nextP.title = locked ? 'Period cannot be switched until the clock reaches 00:00' : 'Advance period';
+        }
         const panel = document.getElementById('clock-panel');
         panel.classList.toggle('is-running', state.clockRunning && !isPen);
         panel.classList.toggle('is-penalties', isPen);
@@ -2733,22 +2921,37 @@
       });
 
       document.getElementById('sel-period').addEventListener('change', e => {
+        if (isPeriodSwitchLocked()) {
+          e.target.value = state.period;
+          toast('Cannot switch period until the timer reaches 00:00');
+          return;
+        }
         state.period = e.target.value;
         state.clockRunning = false;
         if (state.period === 'Half-Time') {
           state.status = 'halftime';
+          state.htAt = Date.now();
           state.clockSec = state.breakMinutes * 60;
         } else if (state.period === 'Penalties') {
           if (state.status === 'halftime') state.status = 'live';
           toast('Penalty Shootout mode (no time limit)');
         } else {
           if (state.status === 'halftime') state.status = 'live';
+          if (state.period === '2nd Half') {
+            state.h2At = Date.now();
+            state.teams.home.fouls = 0;
+            state.teams.away.fouls = 0;
+          }
           state.clockSec = (state.period.startsWith('Extra') ? 5 : state.halfMinutes) * 60;
         }
         saveState(); render();
       });
 
       document.getElementById('btn-next-period').addEventListener('click', () => {
+        if (isPeriodSwitchLocked()) {
+          toast('Cannot switch period until the timer reaches 00:00');
+          return;
+        }
         state.clockRunning = false;
         if (state.period === '1st Half') {
           state.period = 'Half-Time';
@@ -2846,33 +3049,37 @@
       });
 
       document.getElementById('btn-reset-match').addEventListener('click', () => {
+        const isLinked = !!state.linked;
         openModal(
           'Reset Match?',
-          `<p style="margin:0;color:var(--fg-muted);">This clears the score, accumulated fouls, timeouts, clock, shootout, suspensions, and events.</p>`,
+          `<p style="margin:0;color:var(--fg-muted);">This clears the score, accumulated fouls, timeouts, clock, shootout, suspensions, and events.${isLinked ? ' Teams and players synced from the main app will stay locked.' : ''}</p>`,
           (body, acts) => {
             acts.querySelector('#am-reset-scores').addEventListener('click', () => {
-              const keepHome = { name: state.teams.home.name, color: state.teams.home.color, players: state.teams.home.players.map(p => ({ ...p, goals: 0, assists: 0, yellow: 0, red: 0 })) };
-              const keepAway = { name: state.teams.away.name, color: state.teams.away.color, players: state.teams.away.players.map(p => ({ ...p, goals: 0, assists: 0, yellow: 0, red: 0 })) };
+              const keepLinked = state.linked ? Object.assign({}, state.linked) : null;
+              const keepHome = { name: state.teams.home.name, color: state.teams.home.color, players: state.teams.home.players.map(p => ({ ...p, goals: 0, assists: 0, fouls: 0, yellow: 0, red: 0 })) };
+              const keepAway = { name: state.teams.away.name, color: state.teams.away.color, players: state.teams.away.players.map(p => ({ ...p, goals: 0, assists: 0, fouls: 0, yellow: 0, red: 0 })) };
               const half = state.halfMinutes, brk = state.breakMinutes;
               state = defaultState();
+              state.linked = keepLinked;
               state.halfMinutes = half;
               state.breakMinutes = brk;
               state.clockSec = half * 60;
               Object.assign(state.teams.home, keepHome);
               Object.assign(state.teams.away, keepAway);
               actionModal.hidden = true;
-              saveState(); render();
+              saveState(); render(); updateSyncPill();
               toast('Match reset (teams & players kept)');
             });
-            acts.querySelector('#am-reset-all').addEventListener('click', () => {
+            const allBtn = acts.querySelector('#am-reset-all');
+            if (allBtn) allBtn.addEventListener('click', () => {
               state = defaultState();
               actionModal.hidden = true;
-              saveState(); render();
+              saveState(); render(); updateSyncPill();
               toast('Full reset complete');
             });
           },
           `<button class="btn btn-ghost btn-sm" type="button" id="am-reset-scores">Reset match only</button>
-           <button class="btn btn-live btn-sm" type="button" id="am-reset-all">Reset everything</button>`
+           ${isLinked ? '' : '<button class="btn btn-live btn-sm" type="button" id="am-reset-all">Reset everything</button>'}`
         );
       });
 
@@ -3060,9 +3267,78 @@
         }
       }
 
+      function extractSquadPlayers(team, teamId, srcGoals, srcCards, existingPlayers) {
+        const raw = Array.isArray(team && team.players) ? team.players : [];
+        const prevById = new Map();
+        const prevByName = new Map();
+        (existingPlayers || []).forEach(p => {
+          if (p.id) prevById.set(String(p.id), p);
+          if (p.name) prevByName.set(String(p.name).trim().toLowerCase(), p);
+        });
+        const list = raw.map((item, idx) => {
+          const isStr = typeof item === 'string';
+          const name = (isStr ? item : (item && (item.name || item.player || item.fullName) || '')).trim();
+          if (!name) return null;
+          const numVal = isStr ? '' : (item.number != null ? item.number : (item.num != null ? item.num : (item.jersey != null ? item.jersey : '')));
+          const id = (!isStr && item.id) ? String(item.id) : (`sq_${teamId}_${idx}_${name.toLowerCase().replace(/[^a-z0-9]+/g, '')}`);
+          const prev = prevById.get(id) || prevByName.get(name.toLowerCase());
+          const gCount = srcGoals ? srcGoals.filter(g => String(g.team) === String(teamId) && g.player === name).length : (prev ? prev.goals : 0);
+          const aCount = srcGoals ? srcGoals.filter(g => String(g.team) === String(teamId) && g.assist === name).length : (prev ? prev.assists : 0);
+          const yCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'y').length : (prev ? prev.yellow : 0);
+          const rCount = srcCards ? srcCards.filter(c => String(c.team) === String(teamId) && c.player === name && c.c === 'r').length : (prev ? prev.red : 0);
+          return {
+            id,
+            num: numVal !== '' && numVal != null ? String(numVal) : '',
+            name,
+            goals: gCount,
+            assists: aCount,
+            yellow: yCount,
+            red: rCount,
+            fouls: prev ? (prev.fouls || 0) : 0,
+            fromMain: true
+          };
+        }).filter(Boolean);
+        list.sort((a, b) => {
+          const na = a.num === '' ? 9999 : parseInt(a.num, 10);
+          const nb = b.num === '' ? 9999 : parseInt(b.num, 10);
+          if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+          return a.name.localeCompare(b.name);
+        });
+        return list;
+      }
+
+      function syncLinkedRostersFromCloud() {
+        if (!state.linked || !cloud.tournaments.length) return;
+        const t = cloud.tournaments.find(x => x.id === state.linked.tournamentId);
+        if (!t) return;
+        const m = (t.matches || []).find(x => x.id === state.linked.matchId);
+        if (!m) return;
+        const homeTeam = (t.squads || []).find(s => String(s.id) === String(m.home));
+        const awayTeam = (t.squads || []).find(s => String(s.id) === String(m.away));
+        let changed = false;
+        [['home', homeTeam, m.home], ['away', awayTeam, m.away]].forEach(([tk, team, tid]) => {
+          if (!team) return;
+          const synced = extractSquadPlayers(team, tid, null, null, state.teams[tk].players);
+          if (synced.length || !state.teams[tk].players.length) {
+            const prevSig = JSON.stringify(state.teams[tk].players.map(p => [p.id, p.num, p.name, p.fromMain]));
+            const nextSig = JSON.stringify(synced.map(p => [p.id, p.num, p.name, p.fromMain]));
+            if (prevSig !== nextSig || state.teams[tk].name !== team.name) {
+              state.teams[tk].name = team.name;
+              if (team.c1) state.teams[tk].color = team.c1;
+              state.teams[tk].players = synced;
+              changed = true;
+            }
+          }
+        });
+        if (changed) {
+          saveState(true);
+          render();
+        }
+      }
+
       function loadMatchFromTournament(t, m) {
-        const homeTeam = (t.squads || []).find(s => s.id === m.home);
-        const awayTeam = (t.squads || []).find(s => s.id === m.away);
+        const homeTeam = (t.squads || []).find(s => String(s.id) === String(m.home));
+        const awayTeam = (t.squads || []).find(s => String(s.id) === String(m.away));
         if (!homeTeam || !awayTeam) {
           toast('Both teams must be assigned to this match first.');
           return;
@@ -3070,24 +3346,12 @@
         const matchNo = (t.matches || []).indexOf(m) + 1;
         const isPlayed = m.hs != null && m.as != null;
 
-        const mapPlayers = (team, teamId) => (team.players || []).map(p => {
-          const allG = isPlayed ? (m.goals || []) : (m.lgoals || []);
-          const allC = isPlayed ? (m.cards || []) : (m.lcards || []);
-          return {
-            id: p.id || uid(),
-            num: p.number != null ? String(p.number) : '',
-            name: p.name,
-            goals: allG.filter(g => g.team === teamId && g.player === p.name).length,
-            assists: allG.filter(g => g.team === teamId && g.assist === p.name).length,
-            yellow: allC.filter(c => c.team === teamId && c.player === p.name && c.c === 'y').length,
-            red: allC.filter(c => c.team === teamId && c.player === p.name && c.c === 'r').length
-          };
-        });
+        const srcGoals = isPlayed ? (m.goals || []) : (m.lgoals || []);
+        const srcCards = isPlayed ? (m.cards || []) : (m.lcards || []);
+        const mapPlayers = (team, teamId) => extractSquadPlayers(team, teamId, srcGoals, srcCards);
 
         // Reconstruct events log from existing live or saved goals/cards
         const rebuiltEvents = [];
-        const srcGoals = isPlayed ? (m.goals || []) : (m.lgoals || []);
-        const srcCards = isPlayed ? (m.cards || []) : (m.lcards || []);
         srcGoals.forEach(g => {
           const tk = g.team === m.away ? 'away' : 'home';
           const tm = tk === 'home' ? homeTeam.name : awayTeam.name;
@@ -3426,6 +3690,8 @@
                 const foundT = cloud.tournaments.find(x => x.id === qT);
                 const foundM = foundT && (foundT.matches || []).find(x => x.id === qM);
                 if (foundT && foundM) loadMatchFromTournament(foundT, foundM);
+              } else if (state.linked) {
+                syncLinkedRostersFromCloud();
               }
               if (!connectModal.hidden) renderConnectModal();
             });
