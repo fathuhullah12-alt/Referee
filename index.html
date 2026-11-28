@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Futsal Match Control · Referee &amp; Judge Panel</title>
   <meta name="theme-color" content="#121817">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600;700&display=swap">
@@ -1449,12 +1452,18 @@
       color: #fff;
     }
     .ps-wrap {
-      display: grid;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
       gap: 12px;
-      padding: 12px 0 28px;
+      padding: 12px 0 36px;
     }
     .ps-wrap[hidden] { display: none; }
     .ps-bar {
+      flex: none;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -1474,6 +1483,7 @@
     .ps-bar .ps-search { flex: 1 1 160px; min-width: 140px; }
     .ps-bar .ps-sort { flex: 0 1 150px; min-width: 125px; }
     .ps-kpis {
+      flex: none;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 8px;
@@ -1489,16 +1499,21 @@
     .ps-kpi strong { font: 800 24px/1.05 var(--font-display); }
     .ps-kpi small { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-dim); }
     .ps-card {
+      flex: none;
       border-radius: 14px;
       background: var(--card);
       border: 1px solid var(--line);
       overflow: hidden;
     }
-    .ps-table-wrap { overflow-x: auto; }
+    .ps-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .ps-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .ps-table th, .ps-table td { padding: 9px 10px; border-bottom: 1px solid var(--line-soft); text-align: center; white-space: nowrap; }
     .ps-table th:nth-child(2), .ps-table td:nth-child(2) { text-align: left; white-space: normal; min-width: 170px; }
-    .ps-table th { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-dim); background: var(--field); }
+    .ps-table th { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-dim); background: var(--field); user-select: none; }
+    .ps-table th[data-ps-sort] { cursor: pointer; transition: color .12s, background .12s; }
+    .ps-table th[data-ps-sort]:hover { color: var(--fg); background: color-mix(in srgb, var(--teal) 10%, var(--field)); }
+    .ps-table th[data-ps-sort].is-sorted { color: var(--teal); background: color-mix(in srgb, var(--teal) 14%, var(--field)); }
+    .ps-sort-arr { margin-left: 3px; font-size: 9px; opacity: .9; }
     .ps-row { cursor: pointer; transition: background .12s; }
     .ps-row:hover { background: color-mix(in srgb, var(--teal) 8%, transparent); }
     .ps-row.is-open { background: color-mix(in srgb, var(--teal) 12%, transparent); }
@@ -1555,6 +1570,7 @@
       vertical-align: middle;
     }
     .ai-box {
+      flex: none;
       border-radius: 16px;
       background: linear-gradient(145deg, color-mix(in srgb, var(--teal) 10%, var(--card)), var(--card));
       border: 1px solid color-mix(in srgb, var(--teal) 38%, var(--line));
@@ -1886,7 +1902,9 @@
           <option value="fouls">Sort: Fouls</option>
           <option value="yellow">Sort: Yellow cards</option>
           <option value="red">Sort: Red cards</option>
+          <option value="penGoals">Sort: Pen Goals</option>
           <option value="matches">Sort: Matches</option>
+          <option value="num">Sort: Jersey #</option>
           <option value="name">Sort: Name</option>
         </select>
       </div>
@@ -4720,7 +4738,7 @@
       }
 
       // ===== Tournament Player Match Data Tab =====
-      let psState = { tournamentId: '', teamId: '', search: '', sort: 'goals', openKey: '' };
+      let psState = { tournamentId: '', teamId: '', search: '', sort: 'goals', dir: 'desc', openKey: '' };
       const tabMatchBtn = document.getElementById('tab-match');
       const tabPlayersBtn = document.getElementById('tab-players');
       const viewMatchEl = document.getElementById('view-match');
@@ -4756,6 +4774,7 @@
       });
       document.getElementById('ps-sort').addEventListener('change', e => {
         psState.sort = e.target.value;
+        psState.dir = (psState.sort === 'name' || psState.sort === 'num') ? 'asc' : 'desc';
         renderPlayerStats();
       });
 
@@ -5066,11 +5085,26 @@
         }
 
         const sKey = psState.sort;
+        const mult = psState.dir === 'asc' ? 1 : -1;
         rows.sort((a, b) => {
-          if (sKey === 'name') return a.name.localeCompare(b.name);
-          if (sKey === 'matches') return b.matchIds.size - a.matchIds.size || b.goals - a.goals || a.name.localeCompare(b.name);
-          return (b[sKey] - a[sKey]) || (b.goals - a.goals) || (b.assists - a.assists) || a.name.localeCompare(b.name);
+          let cmp = 0;
+          if (sKey === 'name') {
+            cmp = a.name.localeCompare(b.name);
+          } else if (sKey === 'num') {
+            const na = a.num === '' ? 9999 : parseInt(a.num, 10);
+            const nb = b.num === '' ? 9999 : parseInt(b.num, 10);
+            cmp = (isNaN(na) ? 9999 : na) - (isNaN(nb) ? 9999 : nb);
+          } else if (sKey === 'matches') {
+            cmp = a.matchIds.size - b.matchIds.size;
+          } else {
+            cmp = (a[sKey] || 0) - (b[sKey] || 0);
+          }
+          if (cmp !== 0) return cmp * mult;
+          return (b.goals - a.goals) || (b.assists - a.assists) || a.name.localeCompare(b.name);
         });
+
+        const sortSel = document.getElementById('ps-sort');
+        if (sortSel && sortSel.value !== sKey) sortSel.value = sKey;
 
         kpisEl.innerHTML = `
           <div class="ps-kpi"><strong>${completedMatches}${liveMatches ? ` <span style="font-size:13px;color:var(--live);">+${liveMatches} live</span>` : ''}</strong><small>Matches Played</small></div>
@@ -5086,20 +5120,28 @@
           return;
         }
 
+        const cols = [
+          ['num', '#'],
+          ['name', 'Player / Official'],
+          ['matches', 'Matches'],
+          ['goals', '⚽ Goals'],
+          ['assists', '🅰️ Assists'],
+          ['saves', '🧤 Saves'],
+          ['fouls', '⚠️ Fouls'],
+          ['yellow', '🟨 Y'],
+          ['red', '🟥 R'],
+          ['penGoals', '🎯 Pen']
+        ];
+
         wrapEl.innerHTML = `
           <table class="ps-table">
             <thead>
               <tr>
-                <th>#</th>
-                <th>Player / Official</th>
-                <th>Matches</th>
-                <th>⚽ Goals</th>
-                <th>🅰️ Assists</th>
-                <th>🧤 Saves</th>
-                <th>⚠️ Fouls</th>
-                <th>🟨 Y</th>
-                <th>🟥 R</th>
-                <th>🎯 Pen</th>
+                ${cols.map(([k, lbl]) => {
+                  const active = sKey === k;
+                  const arr = active ? `<span class="ps-sort-arr">${psState.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+                  return `<th data-ps-sort="${k}" class="${active ? 'is-sorted' : ''}" title="Sort by ${lbl}">${lbl}${arr}</th>`;
+                }).join('')}
               </tr>
             </thead>
             <tbody>
@@ -5152,6 +5194,19 @@
             </tbody>
           </table>
         `;
+
+        wrapEl.querySelectorAll('th[data-ps-sort]').forEach(th => {
+          th.addEventListener('click', () => {
+            const col = th.dataset.psSort;
+            if (psState.sort === col) {
+              psState.dir = psState.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+              psState.sort = col;
+              psState.dir = (col === 'name' || col === 'num') ? 'asc' : 'desc';
+            }
+            renderPlayerStats();
+          });
+        });
 
         wrapEl.querySelectorAll('[data-ps-key]').forEach(tr => {
           tr.addEventListener('click', () => {
